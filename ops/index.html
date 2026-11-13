@@ -49,7 +49,7 @@ const local = p => p ? '0' + String(p).slice(3) : '';
 const ago = t => { const m = Math.round((Date.now() - new Date(t)) / 60000); return m < 60 ? m + ' min' : Math.round(m / 60) + ' h'; };
 const VEH = ['motorbike', 'car', 'van', 'truck'], RANK = { motorbike: 1, car: 2, van: 3, truck: 4 };
 const app = document.getElementById('app');
-const TABS = [['orders', 'Orders'], ['desk', 'Pickup desk'], ['cash', 'Cash'], ['shops', 'Shops'], ['riders', 'Riders'], ['zones', 'Zones & fees'], ['points', 'Pickup points'], ['cats', 'Categories'], ['team', 'Team']];
+const TABS = [['orders', 'Orders'], ['desk', 'Pickup desk'], ['cash', 'Cash'], ['shops', 'Shops'], ['riders', 'Riders'], ['zones', 'Zones & fees'], ['points', 'Pickup points'], ['cats', 'Categories'], ['billing', 'Billing'], ['team', 'Team']];
 let TAB = location.hash.slice(1) || 'orders', timer = null;
 const fail = e => alert(e?.message || String(e));
 
@@ -79,7 +79,7 @@ function shell(email) {
 }
 function show() {
   clearInterval(timer);
-  const fn = { orders, desk, cash, shops, riders, zones, points, cats, team }[TAB] || orders;
+  const fn = { orders, desk, cash, shops, riders, zones, points, cats, billing, team }[TAB] || orders;
   fn(); if (TAB === 'orders' || TAB === 'cash') timer = setInterval(fn, 20000);
 }
 const M = () => document.getElementById('main');
@@ -268,6 +268,50 @@ async function cats() {
     const { error } = await sb.from('market_categories').insert({ name, slug: slug(name), parent_id: document.getElementById('c-parent').value || null });
     if (error) fail(error); cats();
   };
+}
+
+// ---------- billing ----------
+async function billing() {
+  const [{ data: cfg }, { data: st, error }, { data: ap }] = await Promise.all([
+    sb.from('market_settings').select('*').maybeSingle(),
+    sb.from('commission_statements').select('*,organizations(business_name)').in('status', ['issued', 'overdue']).order('due_date'),
+    sb.from('addon_payments').select('*,organizations(business_name)').eq('status', 'submitted').order('submitted_at')]);
+  if (error) return M().innerHTML = `<div class="err">${E(error.message)}</div>`;
+  const c = cfg || {}, month = d => new Date(d + 'T00:00:00').toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  M().innerHTML = `<h2>Billing</h2>
+    <div class="box"><b>Settings</b><div class="row" style="margin-top:8px;">
+      <label class="fg">Add-on price / month (GH₵)<input id="b-pm" type="number" min="0" step="1" value="${c.addon_price_monthly ?? ''}"></label>
+      <label class="fg">Add-on price / year (GH₵)<input id="b-py" type="number" min="0" step="1" value="${c.addon_price_yearly ?? ''}"></label>
+      <label class="fg">NYANSATEK MoMo number<input id="b-momo" type="tel" value="${c.nyansatek_momo_number ? local(c.nyansatek_momo_number) : ''}"></label>
+      <label class="fg">MoMo account name<input id="b-momoname" value="${E(c.nyansatek_momo_name || '')}"></label>
+      <label class="fg">Commission %<input id="b-rate" type="number" min="0" max="50" step="0.5" value="${Number(c.commission_rate || 0.05) * 100}"></label>
+      <label class="fg">Days to pay a statement<input id="b-due" type="number" min="1" max="60" value="${c.commission_due_days ?? 7}"></label>
+      <button class="btn gold" id="b-save">Save</button></div>
+      <p class="note" style="margin-top:6px;">Statements are issued on the 1st of each month. Listings hide ${c.overdue_grace_days ?? 3} days after a statement's due date if unpaid. An add-on switches off ${c.overdue_grace_days ?? 3} days after its paid-until date.</p></div>
+    <h2>Add-on payments to confirm (${(ap || []).length})</h2>
+    ${(ap || []).length ? `<table><tr><th>Shop</th><th>Period</th><th>Amount</th><th>MoMo ID</th><th>Sent</th><th></th></tr>${ap.map(a => `<tr><td>${E(a.organizations?.business_name)}</td><td>${E(a.period)}</td><td>${GH(a.amount)}</td><td>${E(a.momo_txn_id)}</td><td>${ago(a.submitted_at)} ago</td>
+      <td><button class="btn" onclick="confirmAddon('${a.id}',true)">Received</button> <button class="btn bad" onclick="confirmAddon('${a.id}',false)">Not found</button></td></tr>`).join('')}</table>` : '<div class="empty">None waiting.</div>'}
+    <h2 style="margin-top:18px;">Unpaid commission statements (${(st || []).length})</h2>
+    ${(st || []).length ? `<table><tr><th>Shop</th><th>Month</th><th>Orders</th><th>Commission</th><th>Due</th><th>Status</th><th>MoMo ID</th><th></th></tr>${st.map(x => `<tr class="${x.status === 'overdue' ? 'late' : ''}"><td>${E(x.organizations?.business_name)}</td><td>${E(month(x.period_month))}</td><td>${x.orders_count}</td><td><b>${GH(x.commission_amount)}</b></td>
+      <td>${E(x.due_date || '')}</td><td><span class="pill ${x.status === 'overdue' ? 'bad' : 'warn'}">${E(x.status)}</span></td><td>${E(x.payment_ref || '—')}</td>
+      <td><button class="btn" onclick="confirmStmt('${x.id}',true)">Paid</button>${x.payment_ref ? ` <button class="btn bad" onclick="confirmStmt('${x.id}',false)">Not found</button>` : ''}</td></tr>`).join('')}</table>` : '<div class="empty">Nothing owed.</div>'}`;
+  document.getElementById('b-save').onclick = async () => {
+    const v = id => document.getElementById(id).value.trim(), num = x => x === '' ? null : Number(x);
+    const d = String(v('b-momo')).replace(/\D/g, ''), momo = /^0\d{9}$/.test(d) ? '233' + d.slice(1) : /^233\d{9}$/.test(d) ? d : null;
+    if (v('b-momo') && !momo) return alert('Enter a valid MoMo number.');
+    const { error } = await sb.from('market_settings').update({ addon_price_monthly: num(v('b-pm')), addon_price_yearly: num(v('b-py')), nyansatek_momo_number: momo,
+      nyansatek_momo_name: v('b-momoname') || null, commission_rate: Number(v('b-rate') || 5) / 100, commission_due_days: Number(v('b-due') || 7), updated_at: new Date().toISOString() }).eq('id', true);
+    if (error) fail(error); else alert('Saved.'); billing();
+  };
+}
+async function confirmAddon(id, ok) {
+  const note = ok ? null : prompt('Why? (kept on record)', 'Payment not found');
+  if (!ok && note === null) return;
+  const { error } = await sb.rpc('ops_confirm_addon_payment', { p_payment: id, p_ok: ok, p_note: note }); if (error) fail(error); billing();
+}
+async function confirmStmt(id, paid) {
+  if (paid && !confirm('Mark this statement as paid? Check the MoMo transaction first.')) return;
+  const { error } = await sb.rpc('ops_confirm_statement', { p_statement: id, p_paid: paid }); if (error) fail(error); billing();
 }
 
 // ---------- team ----------
