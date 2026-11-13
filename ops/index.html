@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>NYANSATEK team · nyansatek.market</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<style>
+:root{--p:#17264a;--a:#d1a03a;--bg:#f3f4f7;--b:#e2e6ec;--g:#667487;--ok:#127a46;--bad:#b42318;}
+*{box-sizing:border-box;margin:0;padding:0;font-family:'Inter',system-ui,sans-serif;}
+body{background:var(--bg);color:#111827;}
+header{background:var(--p);color:#fff;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;}
+header b span{color:var(--a);}
+nav{display:flex;gap:4px;flex-wrap:wrap;padding:10px 16px;background:#fff;border-bottom:1px solid var(--b);position:sticky;top:0;z-index:5;}
+nav button{border:1px solid var(--b);background:#fff;border-radius:999px;padding:7px 12px;font-size:.85rem;cursor:pointer;}
+nav button.on{background:var(--p);color:#fff;border-color:var(--p);}
+main{padding:16px;max-width:1200px;margin:0 auto;}
+h2{font-size:1.05rem;margin:4px 0 12px;}
+table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--b);border-radius:12px;overflow:hidden;font-size:.86rem;}
+th,td{padding:8px 10px;border-bottom:1px solid var(--b);text-align:left;vertical-align:top;}
+th{background:#f8f9fb;font-size:.78rem;color:#344054;}
+tr.late td{background:#fff7e6;}
+.btn{border:0;border-radius:8px;padding:7px 11px;font-size:.84rem;font-weight:700;cursor:pointer;background:var(--p);color:#fff;}
+.btn.sec{background:#fff;color:var(--p);border:1px solid var(--b);} .btn.gold{background:var(--a);color:#1a1405;} .btn.bad{background:#fff;color:var(--bad);border:1px solid #f1c0bb;}
+.box{background:#fff;border:1px solid var(--b);border-radius:12px;padding:14px;margin:12px 0;}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:end;}
+.fg{display:flex;flex-direction:column;gap:3px;font-size:.78rem;font-weight:600;color:#344054;}
+input,select{padding:8px 10px;border:1px solid var(--b);border-radius:8px;font-size:.9rem;background:#fff;}
+.pill{display:inline-block;border-radius:999px;padding:2px 8px;font-size:.74rem;font-weight:700;background:#eef0f4;}
+.pill.ok{background:#e7f6ee;color:var(--ok);} .pill.warn{background:#fff3d6;color:#8a5a00;} .pill.bad{background:#fdecea;color:var(--bad);}
+.note{font-size:.8rem;color:var(--g);}
+.empty{color:var(--g);text-align:center;padding:24px;}
+.card{background:#fff;border:1px solid var(--b);border-radius:14px;padding:20px;max-width:400px;margin:60px auto;}
+.err{color:var(--bad);font-weight:600;font-size:.88rem;margin:8px 0;}
+.secret{font-family:monospace;background:#f3f4f7;padding:2px 6px;border-radius:6px;}
+</style>
+</head>
+<body>
+<div id="app"><div class="empty">Loading…</div></div>
+<script>
+const SUPABASE_URL = "https://kqwqbohoeltlbwcopeug.supabase.co";
+const sb = window.supabase.createClient(SUPABASE_URL, "sb_publishable_T6oCd3aRO0OPheQXEkmvRA_nvIhEPcv");
+const E = s => s == null ? '' : String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+const GH = n => 'GH₵' + Number(n || 0).toFixed(2);
+const local = p => p ? '0' + String(p).slice(3) : '';
+const ago = t => { const m = Math.round((Date.now() - new Date(t)) / 60000); return m < 60 ? m + ' min' : Math.round(m / 60) + ' h'; };
+const VEH = ['motorbike', 'car', 'van', 'truck'], RANK = { motorbike: 1, car: 2, van: 3, truck: 4 };
+const app = document.getElementById('app');
+const TABS = [['orders', 'Orders'], ['desk', 'Pickup desk'], ['cash', 'Cash'], ['shops', 'Shops'], ['riders', 'Riders'], ['zones', 'Zones & fees'], ['points', 'Pickup points'], ['cats', 'Categories'], ['team', 'Team']];
+let TAB = location.hash.slice(1) || 'orders', timer = null;
+const fail = e => alert(e?.message || String(e));
+
+async function start() {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) return login();
+  const { data: ok } = await sb.rpc('is_market_ops');
+  if (ok !== true) { await sb.auth.signOut(); return login('This login is not a NYANSATEK team account.'); }
+  shell(session.user.email);
+}
+function login(msg) {
+  app.innerHTML = `<div class="card"><h2>NYANSATEK team</h2>
+    <div class="fg">Email<input id="em" type="email" autocomplete="username"></div><br>
+    <div class="fg">Password<input id="pw" type="password" autocomplete="current-password"></div>
+    <div class="err" id="err">${E(msg || '')}</div><button class="btn gold" id="go" style="width:100%;padding:11px;">Sign in</button></div>`;
+  document.getElementById('go').onclick = async () => {
+    const { error } = await sb.auth.signInWithPassword({ email: document.getElementById('em').value.trim(), password: document.getElementById('pw').value });
+    if (error) return document.getElementById('err').textContent = 'Email or password is wrong.';
+    start();
+  };
+}
+function shell(email) {
+  app.innerHTML = `<header><b>nyansatek<span>.market</span> · team</b><span class="note" style="color:#cbd5e1">${E(email)} · <a href="#" style="color:#fff" onclick="sb.auth.signOut().then(()=>login());return false;">Sign out</a></span></header>
+    <nav>${TABS.map(([k, l]) => `<button data-k="${k}" class="${TAB === k ? 'on' : ''}">${l}</button>`).join('')}</nav><main id="main"></main>`;
+  app.querySelectorAll('nav button').forEach(b => b.onclick = () => { TAB = b.dataset.k; location.hash = TAB; app.querySelectorAll('nav button').forEach(x => x.classList.toggle('on', x === b)); show(); });
+  show();
+}
+function show() {
+  clearInterval(timer);
+  const fn = { orders, desk, cash, shops, riders, zones, points, cats, team }[TAB] || orders;
+  fn(); if (TAB === 'orders' || TAB === 'cash') timer = setInterval(fn, 20000);
+}
+const M = () => document.getElementById('main');
+
+// ---------- orders board ----------
+let RIDERS = [];
+async function orders() {
+  const since = new Date(Date.now() - 864e5).toISOString();
+  const [{ data, error }, { data: rd }] = await Promise.all([
+    sb.from('online_orders').select('*,organizations(business_name),pickup_points(name),delivery_zones(name),delivery_jobs(id,kind,status,vehicle,rider_id,riders(full_name,phone))')
+      .or(`status.in.(placed,accepted,ready,in_transit,at_pickup_point,returning,delivered,collected),created_at.gte.${since}`).order('created_at', { ascending: false }).limit(300),
+    sb.from('riders').select('id,full_name,vehicle,online,active,phone').eq('active', true).order('full_name')]);
+  if (error) return M().innerHTML = `<div class="err">${E(error.message)}</div>`;
+  RIDERS = rd || [];
+  const rows = data || [];
+  const live = rows.filter(o => !['completed', 'cancelled', 'returned'].includes(o.status) && !(['delivered', 'collected'].includes(o.status) && o.cash_status === 'none'));
+  const finished = rows.filter(o => !live.includes(o));
+  const late = o => o.status === 'placed' && (new Date(o.accept_deadline) - Date.now()) < 4 * 60000;
+  const job = o => (o.delivery_jobs || []).find(j => j.status !== 'cancelled' && j.status !== 'done') || null;
+  const tr = o => {
+    const j = job(o), mins = Math.max(0, Math.ceil((new Date(o.accept_deadline) - Date.now()) / 60000));
+    const riderSel = j && ['open', 'assigned', 'at_shop'].includes(j.status) ? `<select onchange="assign('${j.id}',this.value)"><option value="">${j.rider_id ? 'Unassign' : 'Assign rider…'}</option>${RIDERS.filter(r => RANK[r.vehicle] >= RANK[j.vehicle]).map(r => `<option value="${r.id}" ${r.id === j.rider_id ? 'selected' : ''}>${E(r.full_name)} (${r.vehicle}${r.online ? ', online' : ''})</option>`).join('')}</select>` : '';
+    return `<tr class="${late(o) ? 'late' : ''}"><td><b>${E(o.code)}</b><div class="note">${ago(o.created_at)} ago · ${o.channel === 'market' ? 'market' : 'own shop'}</div></td>
+      <td>${E(o.organizations?.business_name)}</td>
+      <td>${E(o.customer_name)}<div class="note"><a href="tel:+${E(o.customer_phone)}">${local(o.customer_phone)}</a></div></td>
+      <td>${o.fulfilment === 'delivery' ? `Delivery · ${E(o.vehicle)}<div class="note">${E(o.delivery_zones?.name || '')}</div>` : `Pickup<div class="note">${E(o.pickup_points?.name || '')}</div>`}</td>
+      <td>${GH(Number(o.goods_total) + Number(o.delivery_fee))}<div class="note">${o.payment_method === 'momo' ? 'MoMo' + (o.payment_confirmed_at ? ' ✓' : '') : 'on delivery'}</div></td>
+      <td><span class="pill ${o.status === 'placed' ? 'warn' : ['cancelled', 'returning'].includes(o.status) ? 'bad' : ''}">${E(o.status)}</span>${o.status === 'placed' ? `<div class="note">${mins} min left</div>` : ''}${o.cash_status !== 'none' ? `<div class="note">cash: ${E(o.cash_status.replace(/_/g, ' '))}</div>` : ''}</td>
+      <td>${j ? `${E(j.kind.replace(/_/g, ' '))} · ${E(j.status)}<div class="note">${E(j.riders?.full_name || 'no rider yet')}</div>${riderSel}` : ''}</td>
+      <td>${!['completed', 'cancelled', 'returned', 'delivered', 'collected'].includes(o.status) ? `<button class="btn bad" onclick="cancelOrder('${o.id}','${E(o.code)}')">Cancel</button>` : ''}</td></tr>`;
+  };
+  const table = list => list.length ? `<table><tr><th>Order</th><th>Shop</th><th>Customer</th><th>Fulfilment</th><th>Total</th><th>Status</th><th>Delivery job</th><th></th></tr>${list.map(tr).join('')}</table>` : '<div class="empty">None.</div>';
+  M().innerHTML = `<h2>Live orders (${live.length})</h2><p class="note" style="margin-bottom:8px;">Highlighted: less than 4 minutes left for the shop to accept. Call them. Refreshes every 20 seconds.</p>${table(live)}
+    <h2 style="margin-top:20px;">Finished in the last 24 hours (${finished.length})</h2>${table(finished)}`;
+}
+async function assign(job, rider) { const { error } = await sb.rpc('ops_assign_job', { p_job: job, p_rider: rider || null }); if (error) fail(error); orders(); }
+async function cancelOrder(id, code) {
+  const reason = prompt(`Cancel ${code}? Reason (the customer sees this):`, 'Cancelled by NYANSATEK');
+  if (reason === null) return;
+  const { error } = await sb.rpc('ops_cancel_order', { p_order: id, p_reason: reason }); if (error) fail(error); orders();
+}
+
+// ---------- pickup desk ----------
+function desk() {
+  M().innerHTML = `<h2>Pickup desk</h2><div class="box"><p class="note" style="margin-bottom:10px;">When a customer comes to collect: enter the order number and the 4-digit code from their SMS.</p>
+    <div class="row"><label class="fg">Order number<input id="d-code" placeholder="NS1234"></label><label class="fg">Collection code<input id="d-pin" inputmode="numeric" maxlength="4"></label>
+    <button class="btn gold" id="d-go">Hand over</button></div><div id="d-out" style="margin-top:12px;"></div></div><div id="d-list"></div>`;
+  document.getElementById('d-go').onclick = async () => {
+    const { data, error } = await sb.rpc('ops_pickup_action', { p_code: document.getElementById('d-code').value, p_collection_code: document.getElementById('d-pin').value });
+    document.getElementById('d-out').innerHTML = error ? `<div class="err">${E(error.message)}</div>`
+      : `<div class="pill ok">${E(data.code)} handed over</div> ${data.collect_cash > 0 ? `<b>Collect ${GH(data.collect_cash)} cash</b> from the customer and keep it for the shop.` : 'Already paid by MoMo.'}`;
+    deskList();
+  };
+  deskList();
+}
+async function deskList() {
+  const { data } = await sb.from('online_orders').select('code,customer_name,customer_phone,pickup_deadline,payment_method,goods_total,pickup_points(name)').eq('status', 'at_pickup_point').order('pickup_deadline');
+  const el = document.getElementById('d-list'); if (!el) return;
+  el.innerHTML = `<h2>Waiting to be collected (${(data || []).length})</h2>` + ((data || []).length ? `<table><tr><th>Order</th><th>Customer</th><th>Pickup point</th><th>Collect by</th><th>Cash</th></tr>${data.map(o => `<tr><td>${E(o.code)}</td><td>${E(o.customer_name)} · ${local(o.customer_phone)}</td><td>${E(o.pickup_points?.name)}</td><td>${new Date(o.pickup_deadline).toLocaleString()}</td><td>${o.payment_method === 'pod' ? GH(o.goods_total) : 'MoMo paid'}</td></tr>`).join('')}</table>` : '<div class="empty">Nothing waiting.</div>');
+}
+
+// ---------- cash ----------
+async function cash() {
+  const { data, error } = await sb.from('online_orders').select('code,cash_status,goods_total,delivered_at,organizations(business_name),cash_ledger(entry,holder_kind,rider_id,pickup_point_id,amount,riders(full_name,phone),pickup_points(name))')
+    .in('cash_status', ['with_rider', 'with_pickup_point']).order('delivered_at');
+  if (error) return M().innerHTML = `<div class="err">${E(error.message)}</div>`;
+  const rows = data || [], total = rows.reduce((a, o) => a + Number(o.goods_total), 0);
+  const holder = o => { const c = (o.cash_ledger || []).find(x => x.entry === 'collected'); return c ? (c.holder_kind === 'rider' ? 'Rider ' + (c.riders?.full_name || '') + ' · ' + local(c.riders?.phone) : 'Pickup point ' + (c.pickup_points?.name || '')) : ''; };
+  M().innerHTML = `<h2>Cash not yet handed to shops: ${GH(total)}</h2><p class="note" style="margin-bottom:8px;">The shop confirms each handover in nyansatek.shop → Orders. Older than 24 hours is highlighted.</p>` +
+    (rows.length ? `<table><tr><th>Order</th><th>Shop</th><th>Held by</th><th>Amount</th><th>Since</th></tr>${rows.map(o => `<tr class="${Date.now() - new Date(o.delivered_at) > 864e5 ? 'late' : ''}"><td>${E(o.code)}</td><td>${E(o.organizations?.business_name)}</td><td>${E(holder(o))}</td><td>${GH(o.goods_total)}</td><td>${ago(o.delivered_at)}</td></tr>`).join('')}</table>` : '<div class="empty">All cash has been handed over.</div>');
+}
+
+// ---------- shops ----------
+async function shops() {
+  const { data, error } = await sb.from('organizations').select('id,business_name,contact_email,is_active,shop_online_settings(*)').order('business_name');
+  if (error) return M().innerHTML = `<div class="err">${E(error.message)}</div>`;
+  const st = s => s ? (Array.isArray(s) ? s[0] : s) : null;
+  M().innerHTML = `<h2>Shops</h2><table><tr><th>Shop</th><th>Online Shop add-on</th><th>Paid until</th><th>Shop page</th><th>nyansatek.market</th></tr>${(data || []).map(o => {
+    const s = st(o.shop_online_settings) || {};
+    return `<tr><td><b>${E(o.business_name)}</b><div class="note">${E(o.contact_email || '')}</div></td>
+      <td><label><input type="checkbox" ${s.addon_active ? 'checked' : ''} onchange="setAddon('${o.id}',this.checked)"> ${s.addon_active ? 'On' : 'Off'}</label></td>
+      <td><input type="date" value="${E(s.addon_paid_through || '')}" onchange="setPaid('${o.id}',this.value)"></td>
+      <td>${s.store_slug ? `<a href="https://nyansatek.shop/shop/?s=${E(s.store_slug)}" target="_blank" rel="noopener">${E(s.store_slug)}</a>` : '<span class="note">not set up</span>'}</td>
+      <td><span class="pill ${s.marketplace_status === 'approved' ? 'ok' : s.marketplace_status === 'pending' ? 'warn' : s.marketplace_status === 'suspended' ? 'bad' : ''}">${E(s.marketplace_status || 'none')}</span>${s.listings_hidden_reason ? ` <span class="pill bad">${E(s.listings_hidden_reason.replace(/_/g, ' '))}</span>` : ''}
+        <div style="margin-top:4px;">${s.addon_active && s.marketplace_status !== 'approved' ? `<button class="btn" onclick="setMarket('${o.id}','approved')">Approve</button>` : ''}
+        ${s.marketplace_status === 'approved' ? `<button class="btn bad" onclick="setMarket('${o.id}','suspended')">Suspend</button>` : ''}</div></td></tr>`;
+  }).join('')}</table>`;
+}
+async function upsertSettings(org, patch) {
+  const { error } = await sb.from('shop_online_settings').upsert(Object.assign({ org_id: org }, patch), { onConflict: 'org_id' });
+  if (error) fail(error); shops();
+}
+const setAddon = (org, on) => upsertSettings(org, { addon_active: on });
+const setPaid = (org, d) => upsertSettings(org, { addon_paid_through: d || null });
+async function setMarket(org, status) {
+  if (status === 'suspended' && !confirm('Hide all of this shop\'s products from nyansatek.market?')) return;
+  const { data: { user } } = await sb.auth.getUser();
+  upsertSettings(org, Object.assign({ marketplace_status: status }, status === 'approved' ? { approved_at: new Date().toISOString(), approved_by: user.id } : {}));
+}
+
+// ---------- riders ----------
+let ZONES = [];
+async function riders() {
+  const [{ data: rs, error }, { data: zs }] = await Promise.all([sb.from('riders').select('*').order('full_name'), sb.from('delivery_zones').select('id,name').order('sort').order('name')]);
+  if (error) return M().innerHTML = `<div class="err">${E(error.message)}</div>`;
+  ZONES = zs || [];
+  const zn = ids => (ids || []).map(id => ZONES.find(z => z.id === id)?.name).filter(Boolean).join(', ') || 'All areas';
+  M().innerHTML = `<h2>Riders and drivers (${(rs || []).length})</h2>
+    <div class="box"><b>Add a rider or driver</b><div class="row" style="margin-top:8px;">
+      <label class="fg">Name<input id="r-name"></label><label class="fg">Phone<input id="r-phone" type="tel" placeholder="024XXXXXXX"></label>
+      <label class="fg">Vehicle<select id="r-veh">${VEH.map(v => `<option>${v}</option>`).join('')}</select></label><label class="fg">Plate (optional)<input id="r-plate"></label>
+      <label class="fg">Areas (none = all)<select id="r-zones" multiple size="3">${ZONES.map(z => `<option value="${z.id}">${E(z.name)}</option>`).join('')}</select></label>
+      <button class="btn gold" id="r-go">Create login</button></div><div id="r-out" style="margin-top:8px;"></div></div>
+    <table><tr><th>Name</th><th>Phone</th><th>Vehicle</th><th>Areas</th><th>Status</th><th></th></tr>${(rs || []).map(r => `<tr><td>${E(r.full_name)}</td><td>${local(r.phone)}</td><td>${E(r.vehicle)}${r.plate_number ? '<div class="note">' + E(r.plate_number) + '</div>' : ''}</td>
+      <td>${E(zn(r.zone_ids))}</td><td>${r.active ? (r.online ? '<span class="pill ok">online</span>' : '<span class="pill">offline</span>') : '<span class="pill bad">switched off</span>'}<div class="note">${r.last_seen_at ? 'seen ' + ago(r.last_seen_at) + ' ago' : ''}</div></td>
+      <td><button class="btn sec" onclick="riderActive('${r.id}',${!r.active})">${r.active ? 'Switch off' : 'Switch on'}</button> <button class="btn sec" onclick="riderReset('${r.id}')">New password</button></td></tr>`).join('')}</table>`;
+  document.getElementById('r-go').onclick = async () => {
+    const zones = [...document.getElementById('r-zones').selectedOptions].map(o => o.value);
+    const out = await accounts({ action: 'create_rider', full_name: document.getElementById('r-name').value, phone: document.getElementById('r-phone').value,
+      vehicle: document.getElementById('r-veh').value, plate_number: document.getElementById('r-plate').value, zone_ids: zones });
+    document.getElementById('r-out').innerHTML = out.error ? `<div class="err">${E(out.error)}</div>` : `Created. Give the rider: login <span class="secret">${E(out.login)}</span> password <span class="secret">${E(out.password)}</span> and the app link <b>nyansatek.market/rider/</b>. This password is shown once.`;
+    if (!out.error) setTimeout(riders, 100000);
+  };
+}
+async function accounts(body) {
+  const { data: { session } } = await sb.auth.getSession();
+  const res = await fetch(SUPABASE_URL + '/functions/v1/ops-accounts', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + session.access_token,
+    apikey: 'sb_publishable_T6oCd3aRO0OPheQXEkmvRA_nvIhEPcv' }, body: JSON.stringify(body) });
+  return res.json().catch(() => ({ error: 'Could not reach the server.' }));
+}
+async function riderActive(id, on) { const { error } = await sb.from('riders').update({ active: on, online: on ? undefined : false }).eq('id', id); if (error) fail(error); riders(); }
+async function riderReset(id) {
+  if (!confirm('Give this rider a new password? The old one stops working.')) return;
+  const out = await accounts({ action: 'reset_rider_password', rider_id: id });
+  alert(out.error || `New login: ${out.login}\nPassword: ${out.password}\n(shown once)`);
+}
+
+// ---------- zones & fees ----------
+async function zones() {
+  const [{ data: zs, error }, { data: fs }] = await Promise.all([sb.from('delivery_zones').select('*').order('sort').order('name'), sb.from('delivery_zone_fees').select('*')]);
+  if (error) return M().innerHTML = `<div class="err">${E(error.message)}</div>`;
+  const fee = (z, v) => (fs || []).find(f => f.zone_id === z && f.vehicle === v)?.fee ?? '';
+  M().innerHTML = `<h2>Delivery areas and fees</h2><p class="note" style="margin-bottom:8px;">Fee the customer pays for delivery in each area, by vehicle. The rider keeps it. Leave a fee empty if that vehicle doesn't deliver there.</p>
+    <div class="box"><div class="row"><label class="fg">New area<input id="z-name" placeholder="e.g. Adum / Kejetia"></label><button class="btn gold" id="z-add">Add area</button></div></div>
+    <table><tr><th>Area</th>${VEH.map(v => `<th>${v} (GH₵)</th>`).join('')}<th>Active</th></tr>${(zs || []).map(z => `<tr><td>${E(z.name)}</td>${VEH.map(v => `<td><input type="number" min="0" step="0.5" style="width:90px" value="${fee(z.id, v)}" onchange="setFee('${z.id}','${v}',this.value)"></td>`).join('')}
+      <td><input type="checkbox" ${z.active ? 'checked' : ''} onchange="sb.from('delivery_zones').update({active:this.checked}).eq('id','${z.id}').then(r=>r.error&&fail(r.error))"></td></tr>`).join('')}</table>`;
+  document.getElementById('z-add').onclick = async () => { const name = document.getElementById('z-name').value.trim(); if (!name) return; const { error } = await sb.from('delivery_zones').insert({ name }); if (error) fail(error); zones(); };
+}
+async function setFee(zone, vehicle, val) {
+  const r = val === '' ? await sb.from('delivery_zone_fees').delete().match({ zone_id: zone, vehicle })
+    : await sb.from('delivery_zone_fees').upsert({ zone_id: zone, vehicle, fee: Number(val) }, { onConflict: 'zone_id,vehicle' });
+  if (r.error) fail(r.error);
+}
+
+// ---------- pickup points ----------
+async function points() {
+  const [{ data: ps, error }, { data: zs }] = await Promise.all([sb.from('pickup_points').select('*').order('name'), sb.from('delivery_zones').select('id,name').order('name')]);
+  if (error) return M().innerHTML = `<div class="err">${E(error.message)}</div>`;
+  M().innerHTML = `<h2>Pickup points</h2><div class="box"><b>Add a pickup point</b><div class="row" style="margin-top:8px;">
+    <label class="fg">Name<input id="p-name"></label><label class="fg">Address<input id="p-addr"></label><label class="fg">Landmark<input id="p-land"></label>
+    <label class="fg">Area<select id="p-zone"><option value="">—</option>${(zs || []).map(z => `<option value="${z.id}">${E(z.name)}</option>`).join('')}</select></label>
+    <label class="fg">Phone<input id="p-phone" type="tel"></label><label class="fg">Opening hours<input id="p-hours" placeholder="Mon–Sat 8am–7pm"></label><button class="btn gold" id="p-add">Add</button></div></div>
+    <table><tr><th>Name</th><th>Address</th><th>Area</th><th>Phone</th><th>Hours</th><th>Active</th></tr>${(ps || []).map(p => `<tr><td>${E(p.name)}</td><td>${E(p.address)}${p.landmark ? '<div class="note">' + E(p.landmark) + '</div>' : ''}</td>
+      <td>${E((zs || []).find(z => z.id === p.zone_id)?.name || '')}</td><td>${E(p.phone || '')}</td><td>${E(p.hours || '')}</td>
+      <td><input type="checkbox" ${p.active ? 'checked' : ''} onchange="sb.from('pickup_points').update({active:this.checked}).eq('id','${p.id}').then(r=>r.error&&fail(r.error))"></td></tr>`).join('')}</table>`;
+  document.getElementById('p-add').onclick = async () => {
+    const v = id => document.getElementById(id).value.trim();
+    if (!v('p-name') || !v('p-addr')) return alert('Name and address are required.');
+    const { error } = await sb.from('pickup_points').insert({ name: v('p-name'), address: v('p-addr'), landmark: v('p-land') || null, zone_id: v('p-zone') || null, phone: v('p-phone') || null, hours: v('p-hours') || null });
+    if (error) fail(error); points();
+  };
+}
+
+// ---------- categories ----------
+async function cats() {
+  const { data, error } = await sb.from('market_categories').select('*').order('sort').order('name');
+  if (error) return M().innerHTML = `<div class="err">${E(error.message)}</div>`;
+  const tops = (data || []).filter(c => !c.parent_id);
+  const slug = s => s.toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  M().innerHTML = `<h2>Marketplace categories</h2><div class="box"><div class="row"><label class="fg">Name<input id="c-name"></label>
+    <label class="fg">Under<select id="c-parent"><option value="">(top level)</option>${tops.map(t => `<option value="${t.id}">${E(t.name)}</option>`).join('')}</select></label><button class="btn gold" id="c-add">Add</button></div></div>
+    <table><tr><th>Category</th><th>Active</th></tr>${tops.map(t => [t, ...(data || []).filter(c => c.parent_id === t.id)]).flat().map(c => `<tr><td>${c.parent_id ? '&nbsp;&nbsp;&nbsp;↳ ' : '<b>'}${E(c.name)}${c.parent_id ? '' : '</b>'}</td>
+      <td><input type="checkbox" ${c.active ? 'checked' : ''} onchange="sb.from('market_categories').update({active:this.checked}).eq('id','${c.id}').then(r=>r.error&&fail(r.error))"></td></tr>`).join('')}</table>`;
+  document.getElementById('c-add').onclick = async () => {
+    const name = document.getElementById('c-name').value.trim(); if (!name) return;
+    const { error } = await sb.from('market_categories').insert({ name, slug: slug(name), parent_id: document.getElementById('c-parent').value || null });
+    if (error) fail(error); cats();
+  };
+}
+
+// ---------- team ----------
+function team() {
+  M().innerHTML = `<h2>Team members</h2><div class="box"><p class="note" style="margin-bottom:8px;">Team members can use this dashboard: orders, pickup desk, cash, shops, riders and settings.</p>
+    <div class="row"><label class="fg">Name<input id="t-name"></label><label class="fg">Email<input id="t-email" type="email"></label><button class="btn gold" id="t-go">Create login</button></div>
+    <div id="t-out" style="margin-top:8px;"></div></div>`;
+  document.getElementById('t-go').onclick = async () => {
+    const out = await accounts({ action: 'create_team_member', full_name: document.getElementById('t-name').value, email: document.getElementById('t-email').value });
+    document.getElementById('t-out').innerHTML = out.error ? `<div class="err">${E(out.error)}</div>` : `Created. Login <span class="secret">${E(out.login)}</span> password <span class="secret">${E(out.password)}</span> at <b>nyansatek.market/ops/</b>. Shown once.`;
+  };
+}
+
+start();
+</script>
+</body>
+</html>

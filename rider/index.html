@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#17264a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>NYANSATEK Rider</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="manifest.json">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<style>
+:root{--p:#17264a;--a:#d1a03a;--bg:#f3f4f7;--b:#e2e6ec;--g:#667487;--ok:#127a46;--bad:#b42318;}
+*{box-sizing:border-box;margin:0;padding:0;font-family:'Inter',system-ui,sans-serif;}
+body{background:var(--bg);color:#111827;min-height:100vh;padding-bottom:40px;}
+header{background:var(--p);color:#fff;padding:14px 16px calc(14px);position:sticky;top:0;z-index:5;}
+header .row{display:flex;justify-content:space-between;align-items:center;gap:10px;}
+header b{font-size:1.05rem;}
+.stats{display:flex;gap:10px;margin-top:10px;}
+.stat{flex:1;background:rgba(255,255,255,.1);border-radius:10px;padding:8px 10px;font-size:.78rem;}
+.stat b{display:block;font-size:1.05rem;margin-top:2px;}
+.toggle{border:0;border-radius:999px;padding:8px 14px;font-weight:800;cursor:pointer;}
+.toggle.on{background:#22c55e;color:#052e16;} .toggle.off{background:#fff;color:var(--p);}
+main{padding:12px 14px;max-width:640px;margin:0 auto;}
+h2{font-size:.95rem;margin:16px 0 8px;color:#344054;}
+.job{background:#fff;border:1px solid var(--b);border-radius:14px;padding:14px;margin:10px 0;}
+.job .top{display:flex;justify-content:space-between;gap:8px;font-size:.85rem;color:var(--g);}
+.job .fee{font-weight:800;color:var(--ok);font-size:1rem;}
+.leg{display:flex;gap:10px;margin-top:10px;font-size:.92rem;}
+.leg .dot{width:10px;height:10px;border-radius:50%;margin-top:5px;flex:none;}
+.leg small{display:block;color:var(--g);font-size:.8rem;margin-top:2px;}
+.acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;}
+.btn{border:0;border-radius:10px;padding:11px 14px;font-size:.92rem;font-weight:700;cursor:pointer;background:var(--p);color:#fff;text-decoration:none;display:inline-flex;align-items:center;gap:6px;}
+.btn.gold{background:var(--a);color:#1a1405;} .btn.sec{background:#fff;color:var(--p);border:1px solid var(--b);}
+.btn.wide{width:100%;justify-content:center;}
+.btn:disabled{opacity:.5;}
+.cash{background:#fff7e6;border:1px solid #f5d48c;border-radius:10px;padding:8px 10px;margin-top:10px;font-size:.88rem;}
+.empty{color:var(--g);text-align:center;padding:24px 0;font-size:.9rem;}
+.card{background:#fff;border:1px solid var(--b);border-radius:14px;padding:18px;max-width:420px;margin:40px auto;}
+.fg{margin:12px 0;} .fg label{display:block;font-size:.8rem;font-weight:600;margin-bottom:4px;color:#344054;}
+.fg input{width:100%;padding:11px 12px;border:1px solid var(--b);border-radius:10px;font-size:1rem;}
+.err{color:var(--bad);font-size:.88rem;font-weight:600;margin:8px 0;}
+.pill{display:inline-block;border-radius:999px;padding:2px 8px;font-size:.75rem;font-weight:700;background:#eef0f4;color:#344054;}
+</style>
+</head>
+<body>
+<div id="app"><div class="empty">Loading…</div></div>
+<script>
+const sb = window.supabase.createClient("https://kqwqbohoeltlbwcopeug.supabase.co", "sb_publishable_T6oCd3aRO0OPheQXEkmvRA_nvIhEPcv");
+const E = s => s == null ? '' : String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+const GH = n => 'GH₵' + Number(n || 0).toFixed(2);
+const local = p => p ? '0' + String(p).slice(3) : '';
+const app = document.getElementById('app');
+const normPhone = p => { const d = String(p || '').replace(/\D/g, ''); return /^233\d{9}$/.test(d) ? d : /^0\d{9}$/.test(d) ? '233' + d.slice(1) : /^\d{9}$/.test(d) ? '233' + d : null; };
+const KIND = { to_customer: 'Deliver to customer', to_pickup_point: 'Take to pickup point', return_to_shop: 'Return to shop' };
+let ME = null, timer = null;
+
+async function start() {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) return loginView();
+  const { data, error } = await sb.rpc('rider_me');
+  if (error || !data) { await sb.auth.signOut(); return loginView('This login is not a NYANSATEK rider account.'); }
+  ME = data;
+  if (!ME.active) return app.innerHTML = '<div class="card">Your rider account is switched off. Contact NYANSATEK.</div>';
+  load();
+}
+
+function loginView(msg) {
+  clearInterval(timer);
+  app.innerHTML = `<div class="card"><h2 style="margin-top:0;font-size:1.2rem;">NYANSATEK Rider</h2>
+    <div class="fg"><label>Phone number</label><input id="ph" type="tel" autocomplete="username" placeholder="024XXXXXXX"></div>
+    <div class="fg"><label>Password</label><input id="pw" type="password" autocomplete="current-password"></div>
+    <div class="err" id="err">${E(msg || '')}</div><button class="btn gold wide" id="go">Sign in</button>
+    <p style="font-size:.8rem;color:var(--g);margin-top:10px;">Your login comes from the NYANSATEK team.</p></div>`;
+  document.getElementById('go').onclick = async () => {
+    const phone = normPhone(document.getElementById('ph').value), err = document.getElementById('err');
+    if (!phone) { err.textContent = 'Enter your phone number.'; return; }
+    const { error } = await sb.auth.signInWithPassword({ email: phone + '@rider.nyansatek.internal', password: document.getElementById('pw').value });
+    if (error) { err.textContent = 'Phone number or password is wrong.'; return; }
+    start();
+  };
+}
+
+function mapLink(place) {
+  const q = [place?.address, place?.landmark, place?.zone].filter(Boolean).join(', ');
+  return q ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q + ', Ghana')}` : null;
+}
+function placeHtml(color, label, pl, full) {
+  if (!pl) return '';
+  const m = full ? mapLink(pl) : null;
+  return `<div class="leg"><span class="dot" style="background:${color}"></span><div><b>${E(label)}</b> ${E(pl.name || pl.zone || '')}
+    <small>${E([pl.address, pl.landmark].filter(Boolean).join(' · ') || (pl.zone ? 'Area: ' + pl.zone : ''))}</small>
+    ${full ? `<div class="acts" style="margin-top:6px;">${pl.phone ? `<a class="btn sec" href="tel:+${E(pl.phone)}">Call ${E(local(pl.phone))}</a>` : ''}${m ? `<a class="btn sec" target="_blank" rel="noopener" href="${m}">Map</a>` : ''}</div>` : ''}</div></div>`;
+}
+function jobHtml(j, mode) {
+  const full = mode !== 'open';
+  let acts = '';
+  if (mode === 'open') acts = `<button class="btn gold wide" onclick="accept('${j.job_id}')">Accept job · ${GH(j.fee)}</button>`;
+  else if (mode === 'mine') {
+    if (j.status === 'assigned') acts = `<button class="btn wide" onclick="act('${j.job_id}','at_shop')">I'm at the ${j.kind === 'return_to_shop' ? 'pickup point' : 'shop'}</button>`;
+    else if (j.status === 'at_shop') acts = `<button class="btn gold wide" onclick="act('${j.job_id}','picked_up')" ${j.kind !== 'return_to_shop' && j.order_status !== 'ready' ? 'disabled' : ''}>${j.kind !== 'return_to_shop' && j.order_status !== 'ready' ? 'Waiting for the shop to pack it…' : 'I have the order'}</button>`;
+    else if (j.status === 'picked_up') acts = j.kind === 'to_customer' ? `<button class="btn gold wide" onclick="deliver('${j.job_id}')">Delivered: enter customer's code</button>`
+      : j.kind === 'to_pickup_point' ? `<button class="btn gold wide" onclick="act('${j.job_id}','dropped')">Dropped at the pickup point</button>`
+      : `<button class="btn gold wide" onclick="act('${j.job_id}','returned')">Handed back to the shop</button>`;
+  }
+  return `<div class="job"><div class="top"><span><b style="color:#111827">${E(j.code)}</b> · ${E(KIND[j.kind])} · ${E(j.vehicle)}</span><span class="fee">${GH(j.fee)}</span></div>
+    ${placeHtml('#d1a03a', 'From', j.from, full)}${placeHtml('#127a46', 'To', j.to, full)}
+    <div style="font-size:.85rem;color:var(--g);margin-top:8px;">${j.items} item${j.items === 1 ? '' : 's'}${mode === 'done' ? ' · done' : j.order_status === 'cancelled' ? ' · <b style="color:var(--bad)">order cancelled</b>' : ''}</div>
+    ${j.collect_cash > 0 && mode !== 'done' ? `<div class="cash">Collect <b>${GH(j.collect_cash)}</b> cash from the customer. Keep your ${GH(j.fee)} fee and give <b>${GH(j.collect_cash - j.fee)}</b> to the shop.</div>` : ''}
+    ${j.payment_method === 'momo' && j.kind === 'to_customer' && mode !== 'done' ? '<div class="cash" style="background:#e7f6ee;border-color:#b7e4c7;">Already paid by MoMo. Collect nothing.</div>' : ''}
+    ${acts ? `<div class="acts">${acts}</div>` : ''}</div>`;
+}
+
+async function load() {
+  clearInterval(timer); timer = setInterval(refresh, 15000);
+  await refresh();
+}
+async function refresh() {
+  const [{ data: me }, { data: jobs, error }] = await Promise.all([sb.rpc('rider_me'), sb.rpc('rider_jobs')]);
+  if (error) { if (/JWT|session/i.test(error.message)) return loginView(); }
+  if (me) ME = me;
+  const J = jobs || { mine: [], open: [], done_today: [] };
+  app.innerHTML = `<header><div class="row"><div><b>${E(ME.name)}</b><div style="font-size:.8rem;opacity:.8">${E(ME.vehicle)}${ME.plate ? ' · ' + E(ME.plate) : ''}</div></div>
+      <button class="toggle ${ME.online ? 'on' : 'off'}" onclick="setOnline(${!ME.online})">${ME.online ? 'Online' : 'Go online'}</button></div>
+    <div class="stats"><div class="stat">Cash for shops<b>${GH(ME.cash_on_hand)}</b></div><div class="stat">Fees today<b>${GH(ME.fees_today)}</b></div></div></header>
+  <main>
+    <h2>My jobs (${J.mine.length})</h2>${J.mine.length ? J.mine.map(j => jobHtml(j, 'mine')).join('') : '<div class="empty">No jobs yet.</div>'}
+    <h2>Available jobs${ME.online ? ` (${J.open.length})` : ''}</h2>${!ME.online ? '<div class="empty">Go online to see jobs near you.</div>' : J.open.length ? J.open.map(j => jobHtml(j, 'open')).join('') : '<div class="empty">No jobs right now. This page refreshes itself.</div>'}
+    ${J.done_today.length ? `<h2>Done today (${J.done_today.length})</h2>${J.done_today.map(j => jobHtml(j, 'done')).join('')}` : ''}
+    <p style="text-align:center;margin-top:24px;"><button class="btn sec" onclick="sb.auth.signOut().then(()=>loginView())">Sign out</button></p>
+  </main>`;
+}
+async function setOnline(v) { const { error } = await sb.rpc('rider_set_online', { p_online: v }); if (error) alert(error.message); refresh(); }
+async function accept(id) { const { error } = await sb.rpc('rider_accept_job', { p_job: id }); if (error) alert(error.message); refresh(); }
+async function act(id, a) { const { error } = await sb.rpc('rider_job_action', { p_job: id, p_action: a }); if (error) alert(error.message); refresh(); }
+async function deliver(id) {
+  const code = prompt("Enter the customer's 4-digit code:");
+  if (code === null) return;
+  const { error } = await sb.rpc('rider_job_action', { p_job: id, p_action: 'delivered', p_code: code.trim() });
+  if (error) alert(error.message); refresh();
+}
+start();
+</script>
+</body>
+</html>
