@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex">
-<title>NYANSATEK team · nyansatek.market</title>
+<title>NYANSATEK team · nyansatek.store</title>
 <link rel="icon" href="../favicon.svg" type="image/svg+xml">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
@@ -157,7 +157,7 @@ async function shops() {
   const { data, error } = await sb.from('organizations').select('id,business_name,contact_email,is_active,shop_online_settings(*)').order('business_name');
   if (error) return M().innerHTML = `<div class="err">${E(error.message)}</div>`;
   const st = s => s ? (Array.isArray(s) ? s[0] : s) : null;
-  M().innerHTML = `<h2>Shops</h2><table><tr><th>Shop</th><th>Online Shop add-on</th><th>Paid until</th><th>Shop page</th><th>nyansatek.market</th></tr>${(data || []).map(o => {
+  M().innerHTML = `<h2>Shops</h2><table><tr><th>Shop</th><th>Online Shop add-on</th><th>Paid until</th><th>Shop page</th><th>nyansatek.store</th></tr>${(data || []).map(o => {
     const s = st(o.shop_online_settings) || {};
     return `<tr><td><b>${E(o.business_name)}</b><div class="note">${E(o.contact_email || '')}</div></td>
       <td><label><input type="checkbox" ${s.addon_active ? 'checked' : ''} onchange="setAddon('${o.id}',this.checked)"> ${s.addon_active ? 'On' : 'Off'}</label></td>
@@ -175,7 +175,7 @@ async function upsertSettings(org, patch) {
 const setAddon = (org, on) => upsertSettings(org, { addon_active: on });
 const setPaid = (org, d) => upsertSettings(org, { addon_paid_through: d || null });
 async function setMarket(org, status) {
-  if (status === 'suspended' && !confirm('Hide all of this shop\'s products from nyansatek.market?')) return;
+  if (status === 'suspended' && !confirm('Hide all of this shop\'s products from nyansatek.store?')) return;
   const { data: { user } } = await sb.auth.getUser();
   upsertSettings(org, Object.assign({ marketplace_status: status }, status === 'approved' ? { approved_at: new Date().toISOString(), approved_by: user.id } : {}));
 }
@@ -200,7 +200,7 @@ async function riders() {
     const zones = [...document.getElementById('r-zones').selectedOptions].map(o => o.value);
     const out = await accounts({ action: 'create_rider', full_name: document.getElementById('r-name').value, phone: document.getElementById('r-phone').value,
       vehicle: document.getElementById('r-veh').value, plate_number: document.getElementById('r-plate').value, zone_ids: zones });
-    document.getElementById('r-out').innerHTML = out.error ? `<div class="err">${E(out.error)}</div>` : `Created. Give the rider: login <span class="secret">${E(out.login)}</span> password <span class="secret">${E(out.password)}</span> and the app link <b>nyansatek.market/rider/</b>. This password is shown once.`;
+    document.getElementById('r-out').innerHTML = out.error ? `<div class="err">${E(out.error)}</div>` : `Created. Give the rider: login <span class="secret">${E(out.login)}</span> password <span class="secret">${E(out.password)}</span> and the app link <b>nyansatek.store/rider/</b>. This password is shown once.`;
     if (!out.error) setTimeout(riders, 100000);
   };
 }
@@ -321,7 +321,7 @@ function team() {
     <div id="t-out" style="margin-top:8px;"></div></div>`;
   document.getElementById('t-go').onclick = async () => {
     const out = await accounts({ action: 'create_team_member', full_name: document.getElementById('t-name').value, email: document.getElementById('t-email').value });
-    document.getElementById('t-out').innerHTML = out.error ? `<div class="err">${E(out.error)}</div>` : `Created. Login <span class="secret">${E(out.login)}</span> password <span class="secret">${E(out.password)}</span> at <b>nyansatek.market/ops/</b>. Shown once.`;
+    document.getElementById('t-out').innerHTML = out.error ? `<div class="err">${E(out.error)}</div>` : `Created. Login <span class="secret">${E(out.login)}</span> password <span class="secret">${E(out.password)}</span> at <b>nyansatek.store/ops/</b>. Shown once.`;
   };
 }
 

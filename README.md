@@ -1,4 +1,4 @@
-# nyansatek.market
+# nyansatek.store
 
 NYANSATEK's marketplace: customers browse and order from every shop that lists products on it.
 Static site on GitHub Pages; data comes from the nyansatek-pos Supabase project (public catalogue

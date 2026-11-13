@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>nyansatek.market · Shop from trusted local shops</title>
+<title>nyansatek.store · Shop from trusted local shops</title>
 <meta name="description" content="Shop from trusted local shops in one place. Delivery by NYANSATEK riders or pickup at NYANSATEK points. Pay by MoMo or on delivery.">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -92,9 +92,9 @@ footer{text-align:center;font-size:.8rem;color:var(--g);padding:24px 0 40px;line
   <nav class="nav" id="nav"></nav>
 </div></header>
 <main class="wrap" id="app"><div class="empty">Loading…</div></main>
-<footer class="wrap">Every shop on nyansatek.market runs on NYANSATEK POS, so stock is live.<br>
+<footer class="wrap">Every shop on nyansatek.store runs on NYANSATEK POS, so stock is live.<br>
 Delivery by NYANSATEK riders · Pickup at NYANSATEK points · Pay by MoMo or on delivery<br>
-<a href="#/orders" data-link>My orders</a> · <a href="https://nyansatek.systems" target="_blank" rel="noopener">Sell on nyansatek.market</a></footer>
+<a href="#/orders" data-link>My orders</a> · <a href="https://nyansatek.systems" target="_blank" rel="noopener">Sell on nyansatek.store</a></footer>
 
 <script>
 const SUPABASE_URL = "https://kqwqbohoeltlbwcopeug.supabase.co";
@@ -138,7 +138,7 @@ function addToCart(p, d = 1) {
 }
 
 // ---------- router ----------
-// GitHub Pages hosting: addresses use #, e.g. nyansatek.market/#/c/drinks
+// GitHub Pages hosting: addresses use #, e.g. nyansatek.store/#/c/drinks
 function go(path) { if (location.hash === '#' + path) route(); else location.hash = '#' + path; }
 window.addEventListener('hashchange', () => { route(); window.scrollTo(0, 0); });
 const curPath = () => (location.hash.slice(1) || '/').split('?')[0];
@@ -192,8 +192,8 @@ async function gridPage(title, intro, args) {
 }
 function home() {
   const tops = REF.cats.filter(x => !x.parent_id);
-  document.title = 'nyansatek.market · Shop from trusted local shops';
-  gridPage('New on nyansatek.market', `<div class="hero"><b>Shop from trusted local shops, in one place.</b>
+  document.title = 'nyansatek.store · Shop from trusted local shops';
+  gridPage('New on nyansatek.store', `<div class="hero"><b>Shop from trusted local shops, in one place.</b>
     <p>Live stock from every shop. Delivery by NYANSATEK riders or pickup at a NYANSATEK point. Pay by MoMo or when you receive it.</p></div>
     <h2 class="sec">Shop by category</h2><div class="cats">${tops.map(t => `<a class="cat" href="#/c/${E(t.slug)}" data-link>${E(t.name)}<small>${REF.cats.filter(s => s.parent_id === t.id).slice(0, 3).map(s => E(s.name)).join(' · ')}</small></a>`).join('')}</div>`, {});
 }
@@ -202,18 +202,18 @@ function category(slug) {
   if (!c) { app.innerHTML = '<div class="empty">Category not found.</div>'; return; }
   const top = c.parent_id ? REF.cats.find(x => x.id === c.parent_id) : c;
   const subs = REF.cats.filter(x => x.parent_id === top.id);
-  document.title = c.name + ' · nyansatek.market';
+  document.title = c.name + ' · nyansatek.store';
   gridPage(c.name, subs.length ? `<div class="chips" style="margin-top:14px;"><a class="chip${c.id === top.id ? ' on' : ''}" href="#/c/${E(top.slug)}" data-link>All ${E(top.name)}</a>${subs.map(s => `<a class="chip${s.id === c.id ? ' on' : ''}" href="#/c/${E(s.slug)}" data-link>${E(s.name)}</a>`).join('')}</div>` : '', { p_category: c.id });
 }
 function search(q) {
   document.getElementById('q').value = q;
-  document.title = (q ? q + ' · ' : '') + 'nyansatek.market';
+  document.title = (q ? q + ' · ' : '') + 'nyansatek.store';
   gridPage(q ? `Results for “${q}”` : 'All products', '', { p_q: q || null });
 }
 async function shopPage(slug) {
   const { data } = await sb.rpc('store_catalog', { p_slug: slug });
-  if (!data || !data.shop?.on_market) { app.innerHTML = '<div class="empty">This shop is not on nyansatek.market.</div>'; return; }
-  document.title = data.shop.name + ' · nyansatek.market';
+  if (!data || !data.shop?.on_market) { app.innerHTML = '<div class="empty">This shop is not on nyansatek.store.</div>'; return; }
+  document.title = data.shop.name + ' · nyansatek.store';
   gridPage(data.shop.name, data.shop.tagline ? `<p class="note" style="margin-top:14px;">${E(data.shop.tagline)}</p>` : '', { p_org: data.shop.org_id });
 }
 async function product(orgId, id) {
@@ -221,7 +221,7 @@ async function product(orgId, id) {
   let p;
   try { const { data } = await sb.rpc('market_product', { p_id: id }); p = (data || [])[0]; } catch (e) {}
   if (!p) { app.innerHTML = '<div class="empty">This product is no longer available.</div>'; return; }
-  document.title = p.name + ' · nyansatek.market';
+  document.title = p.name + ' · nyansatek.store';
   const render = () => {
     const inCart = CART[p.org_id]?.items[p.id]?.qty || 0;
     app.innerHTML = `<div class="pdp"><img src="${E(p.photo_url)}" alt="${E(p.name)}">
@@ -242,7 +242,7 @@ async function product(orgId, id) {
 
 // ---------- cart (grouped by shop) ----------
 function cartPage() {
-  document.title = 'Cart · nyansatek.market';
+  document.title = 'Cart · nyansatek.store';
   const shops = Object.entries(CART);
   if (!shops.length) { app.innerHTML = '<h1>Your cart</h1><div class="empty">Your cart is empty. <a href="#/" data-link>Start shopping</a></div>'; return; }
   app.innerHTML = `<h1>Your cart</h1><p class="note">Each shop's items are ordered and delivered separately.</p>` + shops.map(([org, c]) => {
@@ -263,7 +263,7 @@ function checkout(org) {
   let veh = 'motorbike'; items.forEach(i => { if (RANK[i.p.delivery_size] > RANK[veh]) veh = i.p.delivery_size; });
   const goods = items.reduce((a, i) => a + i.qty * Number(i.p.price), 0), truck = veh === 'truck';
   const saved = store.get('buyer') || {};
-  document.title = 'Checkout · nyansatek.market';
+  document.title = 'Checkout · nyansatek.store';
   app.innerHTML = `<h1>Checkout: ${E(c.shop.name)}</h1><div class="box" style="max-width:620px;">
     ${items.map(i => `<div class="line"><img src="${E(i.p.photo_url)}" alt=""><div class="n">${i.qty} × ${E(i.p.name)}</div><b>${GH(i.qty * i.p.price)}</b></div>`).join('')}
     <div class="fg"><label>Your name</label><input id="c-name" autocomplete="name" value="${E(saved.name || '')}"></div>
@@ -321,7 +321,7 @@ function checkout(org) {
 // ---------- my orders (kept on this phone) ----------
 function myOrders() {
   const mine = store.get('my-orders') || [];
-  document.title = 'My orders · nyansatek.market';
+  document.title = 'My orders · nyansatek.store';
   app.innerHTML = `<h1>My orders</h1><p class="note">Orders placed on this phone.</p>` + (mine.length ? mine.map(o =>
     `<a class="box" style="display:flex;justify-content:space-between;text-decoration:none;color:inherit;" href="#/t/${E(o.token)}" data-link><span><b>${E(o.code)}</b><br><span class="note">${E(o.shop)}</span></span><span class="note">${new Date(o.at).toLocaleDateString()}</span></a>`).join('')
     : '<div class="empty">No orders yet.</div>');
@@ -335,7 +335,7 @@ let trackTimer = null;
 async function tracking(token) {
   const { data: o, error } = await sb.rpc('get_online_order', { p_token: token });
   if (error || !o) { app.innerHTML = '<div class="empty">Order not found. Check the link in your SMS.</div>'; return; }
-  document.title = 'Order ' + o.code + ' · nyansatek.market';
+  document.title = 'Order ' + o.code + ' · nyansatek.store';
   const steps = o.fulfilment === 'pickup' ? STEPS_PICKUP : STEPS_DELIVERY;
   const done = o.status === 'completed' ? 99 : ORDER_OF(o.status);
   const ended = ['cancelled', 'returning', 'returned'].includes(o.status);
