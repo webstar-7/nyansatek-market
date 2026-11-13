@@ -72,7 +72,7 @@ function login(msg) {
   };
 }
 function shell(email) {
-  app.innerHTML = `<header><b>nyansatek<span>.market</span> · team</b><span class="note" style="color:#cbd5e1">${E(email)} · <a href="#" style="color:#fff" onclick="sb.auth.signOut().then(()=>login());return false;">Sign out</a></span></header>
+  app.innerHTML = `<header><b>nyansatek<span>.store</span> · team</b><span class="note" style="color:#cbd5e1">${E(email)} · <a href="#" style="color:#fff" onclick="sb.auth.signOut().then(()=>login());return false;">Sign out</a></span></header>
     <nav>${TABS.map(([k, l]) => `<button data-k="${k}" class="${TAB === k ? 'on' : ''}">${l}</button>`).join('')}</nav><main id="main"></main>`;
   app.querySelectorAll('nav button').forEach(b => b.onclick = () => { TAB = b.dataset.k; location.hash = TAB; app.querySelectorAll('nav button').forEach(x => x.classList.toggle('on', x === b)); show(); });
   show();
