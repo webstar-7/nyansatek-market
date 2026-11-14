@@ -202,11 +202,33 @@ function home() {
   document.title = 'nyansatek.store · Shop from trusted local shops';
   gridPage('New on nyansatek.store', `<div class="hero has-reel"><div class="hero-t"><b>Shop from trusted local shops, in one place.</b>
     <p>Live stock from every shop. Delivery by NYANSATEK riders or pickup at a NYANSATEK point. Pay by MoMo or when you receive it.</p></div>
-    <video class="hero-reel" id="hero-reel" muted loop playsinline preload="metadata" poster="assets/store-reel.jpg" aria-label="A short tour: browse live stock, pay by MoMo or on delivery, track your order, or collect at a pickup point"></video></div>
+    <video class="hero-reel" id="hero-reel" muted loop playsinline preload="metadata" poster="assets/store-reel.jpg" data-reel="assets/store-reel.mp4" aria-label="A short tour: browse live stock, pay by MoMo or on delivery, track your order, or collect at a pickup point"></video></div>
     <h2 class="sec">Shop by category</h2><div class="cats">${tops.map(t => `<a class="cat" href="#/c/${E(t.slug)}" data-link>${E(t.name)}<small>${REF.cats.filter(s => s.parent_id === t.id).slice(0, 3).map(s => E(s.name)).join(' · ')}</small></a>`).join('')}</div>`, {});
-  // Hero reel: people who ask for reduced motion see the still poster only.
+  playHeroReel();
+}
+// Hero reels (made with Remotion). People who ask for reduced motion see the still poster only.
+function playHeroReel() {
   const v = document.getElementById('hero-reel');
-  if (v && !matchMedia('(prefers-reduced-motion: reduce)').matches) { v.src = 'assets/store-reel.mp4'; v.play().catch(() => {}); }
+  if (v && !matchMedia('(prefers-reduced-motion: reduce)').matches) { v.src = v.dataset.reel; v.play().catch(() => {}); }
+}
+// One reel per top-level category, stored as assets/cat-<slug>.mp4 and .jpg. Sub-categories show their parent's reel.
+// A category added later has no reel until one is rendered for it, and simply shows no hero.
+const CAT_REELS = {
+  'groceries': 'Stock the kitchen from shops near you.',
+  'electricals': 'Cables, lighting, fans and sockets.',
+  'building-materials': 'Cement, plumbing, paint and roofing.',
+  'home-kitchen': 'Everything for the house.',
+  'phones-accessories': 'Chargers, cases and more.',
+  'health-beauty': 'Care for skin, hair and health.',
+  'fashion': 'Clothes, shoes and bags.',
+  'baby-kids': 'For the little ones.',
+  'stationery-office': 'Books, pens and office supplies.' };
+function catHero(top) {
+  const line = CAT_REELS[top.slug];
+  if (!line) return '';
+  return `<div class="hero has-reel"><div class="hero-t"><b>${E(line)}</b>
+    <p>Live stock from every shop that sells ${E(top.name.toLowerCase())}. Delivery by NYANSATEK riders or pickup at a NYANSATEK point.</p></div>
+    <video class="hero-reel" id="hero-reel" muted loop playsinline preload="metadata" poster="assets/cat-${E(top.slug)}.jpg" data-reel="assets/cat-${E(top.slug)}.mp4" aria-label="A short tour of ${E(top.name)} on nyansatek.store"></video></div>`;
 }
 function category(slug) {
   const c = REF.cats.find(x => x.slug === slug);
@@ -214,7 +236,8 @@ function category(slug) {
   const top = c.parent_id ? REF.cats.find(x => x.id === c.parent_id) : c;
   const subs = REF.cats.filter(x => x.parent_id === top.id);
   document.title = c.name + ' · nyansatek.store';
-  gridPage(c.name, subs.length ? `<div class="chips" style="margin-top:14px;"><a class="chip${c.id === top.id ? ' on' : ''}" href="#/c/${E(top.slug)}" data-link>All ${E(top.name)}</a>${subs.map(s => `<a class="chip${s.id === c.id ? ' on' : ''}" href="#/c/${E(s.slug)}" data-link>${E(s.name)}</a>`).join('')}</div>` : '', { p_category: c.id });
+  gridPage(c.name, catHero(top) + (subs.length ? `<div class="chips" style="margin-top:14px;"><a class="chip${c.id === top.id ? ' on' : ''}" href="#/c/${E(top.slug)}" data-link>All ${E(top.name)}</a>${subs.map(s => `<a class="chip${s.id === c.id ? ' on' : ''}" href="#/c/${E(s.slug)}" data-link>${E(s.name)}</a>`).join('')}</div>` : ''), { p_category: c.id });
+  playHeroReel();
 }
 function search(q) {
   document.getElementById('q').value = q;
