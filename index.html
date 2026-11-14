@@ -29,6 +29,13 @@ h2.sec{font-size:1.05rem;margin:22px 0 10px;}
 .hero{background:linear-gradient(135deg,#17264a,#22386b);color:#fff;border-radius:18px;padding:22px;margin:16px 0;}
 .hero b{color:var(--a);}
 .hero p{opacity:.9;margin-top:6px;font-size:.95rem;line-height:1.45;}
+/* home hero reel (made with Remotion): a short tour of browsing, paying and tracking */
+.hero.has-reel{display:flex;align-items:center;padding:0;overflow:hidden;}
+.hero.has-reel .hero-t{flex:1;min-width:0;padding:26px 30px;}
+.hero.has-reel .hero-t b{display:block;font-size:1.55rem;line-height:1.2;letter-spacing:-.01em;}
+.hero.has-reel .hero-t p{font-size:1rem;max-width:44ch;margin-top:10px;}
+.hero-reel{flex:none;width:320px;aspect-ratio:1/1;object-fit:cover;display:block;background:#0d1630;}
+@media(max-width:720px){.hero.has-reel{flex-direction:column-reverse;align-items:stretch;}.hero.has-reel .hero-t{padding:18px 20px 20px;}.hero.has-reel .hero-t b{font-size:1.2rem;}.hero.has-reel .hero-t p{font-size:.95rem;}.hero-reel{width:100%;aspect-ratio:16/9;}}
 .cats{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;}
 .cat{background:#fff;border:1px solid var(--b);border-radius:14px;padding:14px;text-decoration:none;color:#111827;font-weight:600;font-size:.92rem;}
 .cat small{display:block;color:var(--g);font-weight:400;margin-top:4px;font-size:.78rem;}
@@ -193,9 +200,13 @@ async function gridPage(title, intro, args) {
 function home() {
   const tops = REF.cats.filter(x => !x.parent_id);
   document.title = 'nyansatek.store · Shop from trusted local shops';
-  gridPage('New on nyansatek.store', `<div class="hero"><b>Shop from trusted local shops, in one place.</b>
+  gridPage('New on nyansatek.store', `<div class="hero has-reel"><div class="hero-t"><b>Shop from trusted local shops, in one place.</b>
     <p>Live stock from every shop. Delivery by NYANSATEK riders or pickup at a NYANSATEK point. Pay by MoMo or when you receive it.</p></div>
+    <video class="hero-reel" id="hero-reel" muted loop playsinline preload="metadata" poster="assets/store-reel.jpg" aria-label="A short tour: browse live stock, pay by MoMo or on delivery, track your order, or collect at a pickup point"></video></div>
     <h2 class="sec">Shop by category</h2><div class="cats">${tops.map(t => `<a class="cat" href="#/c/${E(t.slug)}" data-link>${E(t.name)}<small>${REF.cats.filter(s => s.parent_id === t.id).slice(0, 3).map(s => E(s.name)).join(' · ')}</small></a>`).join('')}</div>`, {});
+  // Hero reel: people who ask for reduced motion see the still poster only.
+  const v = document.getElementById('hero-reel');
+  if (v && !matchMedia('(prefers-reduced-motion: reduce)').matches) { v.src = 'assets/store-reel.mp4'; v.play().catch(() => {}); }
 }
 function category(slug) {
   const c = REF.cats.find(x => x.slug === slug);
