@@ -126,7 +126,7 @@ const app = document.getElementById('app');
 const REF = { cats: [], zones: [], fees: [], points: [], ready: null };
 REF.ready = (async () => {
   const [c, z, f, p] = await Promise.all([
-    sb.from('market_categories').select('id,name,slug,parent_id,sort').eq('active', true).order('sort').order('name'),
+    sb.from('market_categories').select('id,name,slug,parent_id,sort').eq('active', true).eq('vertical', 'shop').order('sort').order('name'),
     sb.from('delivery_zones').select('id,name').eq('active', true).order('sort').order('name'),
     sb.from('delivery_zone_fees').select('zone_id,vehicle,fee'),
     sb.from('pickup_points').select('id,name,address,landmark,hours').eq('active', true).order('name')]);

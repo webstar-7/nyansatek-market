@@ -260,12 +260,17 @@ async function cats() {
   const tops = (data || []).filter(c => !c.parent_id);
   const slug = s => s.toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
   M().innerHTML = `<h2>Marketplace categories</h2><div class="box"><div class="row"><label class="fg">Name<input id="c-name"></label>
-    <label class="fg">Under<select id="c-parent"><option value="">(top level)</option>${tops.map(t => `<option value="${t.id}">${E(t.name)}</option>`).join('')}</select></label><button class="btn gold" id="c-add">Add</button></div></div>
-    <table><tr><th>Category</th><th>Active</th></tr>${tops.map(t => [t, ...(data || []).filter(c => c.parent_id === t.id)]).flat().map(c => `<tr><td>${c.parent_id ? '&nbsp;&nbsp;&nbsp;↳ ' : '<b>'}${E(c.name)}${c.parent_id ? '' : '</b>'}</td>
+    <label class="fg">Site<select id="c-vert"><option value="shop">nyansatek.store</option><option value="food">nyansatek.food</option></select></label>
+    <label class="fg">Under<select id="c-parent"><option value="">(top level)</option>${tops.map(t => `<option value="${t.id}">${E(t.name)}${t.vertical === 'food' ? ' (food)' : ''}</option>`).join('')}</select></label><button class="btn gold" id="c-add">Add</button></div>
+    <p style="margin:8px 0 0;font-size:.85rem;opacity:.75;">Categories belong to one site: shop products appear on nyansatek.store, restaurant dishes on nyansatek.food. A sub-category goes on the same site as the category it is under.</p></div>
+    <table><tr><th>Category</th><th>Site</th><th>Active</th></tr>${tops.map(t => [t, ...(data || []).filter(c => c.parent_id === t.id)]).flat().map(c => `<tr><td>${c.parent_id ? '&nbsp;&nbsp;&nbsp;↳ ' : '<b>'}${E(c.name)}${c.parent_id ? '' : '</b>'}</td><td>${c.vertical === 'food' ? 'nyansatek.food' : 'nyansatek.store'}</td>
       <td><input type="checkbox" ${c.active ? 'checked' : ''} onchange="sb.from('market_categories').update({active:this.checked}).eq('id','${c.id}').then(r=>r.error&&fail(r.error))"></td></tr>`).join('')}</table>`;
   document.getElementById('c-add').onclick = async () => {
     const name = document.getElementById('c-name').value.trim(); if (!name) return;
-    const { error } = await sb.from('market_categories').insert({ name, slug: slug(name), parent_id: document.getElementById('c-parent').value || null });
+    const parentId = document.getElementById('c-parent').value || null;
+    const parent = tops.find(t => t.id === parentId);
+    const { error } = await sb.from('market_categories').insert({ name, slug: slug(name), parent_id: parentId,
+      vertical: parent ? (parent.vertical || 'shop') : document.getElementById('c-vert').value });
     if (error) fail(error); cats();
   };
 }
