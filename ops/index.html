@@ -180,29 +180,98 @@ async function setMarket(org, status) {
   upsertSettings(org, Object.assign({ marketplace_status: status }, status === 'approved' ? { approved_at: new Date().toISOString(), approved_by: user.id } : {}));
 }
 
-// ---------- riders ----------
+// ---------- riders: review, checks and decision ----------
 let ZONES = [];
+const R_PILL = { applied: ['warn', 'to review'], more_info: ['warn', 'waiting for rider'], approved: ['ok', 'approved'], rejected: ['bad', 'rejected'], suspended: ['bad', 'suspended'] };
+const R_METHOD = { nia_app: 'NIA verification app', nia_platform: 'NIA platform (IVSP)', nia_card_reader: 'NIA card reader (fingerprint on card)' };
+const dmy = d => d ? new Date(String(d).length === 10 ? d + 'T00:00:00' : d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+const expired = d => d && new Date(d + 'T23:59:59') < new Date();
 async function riders() {
-  const [{ data: rs, error }, { data: zs }] = await Promise.all([sb.from('riders').select('*').order('full_name'), sb.from('delivery_zones').select('id,name').order('sort').order('name')]);
+  const [{ data: rs, error }, { data: zs }] = await Promise.all([sb.from('riders').select('*').order('applied_at', { ascending: false, nullsFirst: false }), sb.from('delivery_zones').select('id,name').order('sort').order('name')]);
   if (error) return M().innerHTML = `<div class="err">${E(error.message)}</div>`;
   ZONES = zs || [];
   const zn = ids => (ids || []).map(id => ZONES.find(z => z.id === id)?.name).filter(Boolean).join(', ') || 'All areas';
-  M().innerHTML = `<h2>Riders and drivers (${(rs || []).length})</h2>
-    <div class="box"><b>Add a rider or driver</b><div class="row" style="margin-top:8px;">
-      <label class="fg">Name<input id="r-name"></label><label class="fg">Phone<input id="r-phone" type="tel" placeholder="024XXXXXXX"></label>
-      <label class="fg">Vehicle<select id="r-veh">${VEH.map(v => `<option>${v}</option>`).join('')}</select></label><label class="fg">Plate (optional)<input id="r-plate"></label>
-      <label class="fg">Areas (none = all)<select id="r-zones" multiple size="3">${ZONES.map(z => `<option value="${z.id}">${E(z.name)}</option>`).join('')}</select></label>
-      <button class="btn gold" id="r-go">Create login</button></div><div id="r-out" style="margin-top:8px;"></div></div>
-    <table><tr><th>Name</th><th>Phone</th><th>Vehicle</th><th>Areas</th><th>Status</th><th></th></tr>${(rs || []).map(r => `<tr><td>${E(r.full_name)}</td><td>${local(r.phone)}</td><td>${E(r.vehicle)}${r.plate_number ? '<div class="note">' + E(r.plate_number) + '</div>' : ''}</td>
-      <td>${E(zn(r.zone_ids))}</td><td>${r.active ? (r.online ? '<span class="pill ok">online</span>' : '<span class="pill">offline</span>') : '<span class="pill bad">switched off</span>'}<div class="note">${r.last_seen_at ? 'seen ' + ago(r.last_seen_at) + ' ago' : ''}</div></td>
-      <td><button class="btn sec" onclick="riderActive('${r.id}',${!r.active})">${r.active ? 'Switch off' : 'Switch on'}</button> <button class="btn sec" onclick="riderReset('${r.id}')">New password</button></td></tr>`).join('')}</table>`;
-  document.getElementById('r-go').onclick = async () => {
-    const zones = [...document.getElementById('r-zones').selectedOptions].map(o => o.value);
-    const out = await accounts({ action: 'create_rider', full_name: document.getElementById('r-name').value, phone: document.getElementById('r-phone').value,
-      vehicle: document.getElementById('r-veh').value, plate_number: document.getElementById('r-plate').value, zone_ids: zones });
-    document.getElementById('r-out').innerHTML = out.error ? `<div class="err">${E(out.error)}</div>` : `Created. Give the rider: login <span class="secret">${E(out.login)}</span> password <span class="secret">${E(out.password)}</span> and the app link <b>nyansatek.store/rider/</b>. This password is shown once.`;
-    if (!out.error) setTimeout(riders, 100000);
-  };
+  const all = rs || [], queue = all.filter(r => ['applied', 'more_info'].includes(r.screening_status)), ok = all.filter(r => r.screening_status === 'approved'), off = all.filter(r => ['rejected', 'suspended'].includes(r.screening_status));
+  const row = r => { const [c, l] = R_PILL[r.screening_status] || ['', r.screening_status];
+    return `<tr><td><b>${E(r.full_name)}</b><div class="note">${local(r.phone)}</div></td><td>${E(r.vehicle)}${r.plate_number ? '<div class="note">' + E(r.plate_number) + '</div>' : ''}</td>
+      <td>${E(zn(r.zone_ids))}</td><td><span class="pill ${c}">${l}</span> ${r.screening_status === 'approved' ? (r.online ? '<span class="pill ok">online</span>' : '<span class="pill">offline</span>') : ''}
+        <div class="note">${r.screening_status === 'approved' ? (r.last_seen_at ? 'seen ' + ago(r.last_seen_at) + ' ago · ' : '') + 're-check ' + dmy(r.next_review_at) : r.applied_at ? 'applied ' + dmy(r.applied_at) : ''}</div></td>
+      <td><span class="pill ${r.id_check_result === 'passed' ? 'ok' : r.id_check_result === 'failed' ? 'bad' : ''}">identity ${E(r.id_check_result)}</span></td>
+      <td><button class="btn ${['applied'].includes(r.screening_status) ? 'gold' : 'sec'}" onclick="riderReview('${r.id}')">${['applied', 'more_info'].includes(r.screening_status) ? 'Review' : 'Open'}</button></td></tr>`; };
+  const table = list => `<table><tr><th>Rider</th><th>Vehicle</th><th>Areas</th><th>Status</th><th>Identity</th><th></th></tr>${list.map(row).join('')}</table>`;
+  M().innerHTML = `<h2>Riders and drivers</h2>
+    <div class="box"><b>How riders join</b><p class="note" style="margin-top:6px;line-height:1.5;">Riders apply themselves at <b>nyansatek.store/rider</b> → “Apply to ride”. They cannot take jobs until you approve them here.
+      Approval needs: identity confirmed with the NIA (biometric, never by looking at the card), licence and vehicle papers seen, guarantor called, and the MoMo name matching.
+      Do not photograph, scan or keep a copy of anyone's Ghana Card.</p></div>
+    <div id="r-detail"></div>
+    <h2>Waiting for review (${queue.length})</h2>${queue.length ? table(queue) : '<div class="empty">No applications waiting.</div>'}
+    <h2 style="margin-top:18px;">Approved (${ok.length})</h2>${ok.length ? table(ok) : '<div class="empty">No approved riders yet.</div>'}
+    ${off.length ? `<h2 style="margin-top:18px;">Rejected or suspended (${off.length})</h2>${table(off)}` : ''}`;
+}
+async function riderReview(id) {
+  const box = document.getElementById('r-detail');
+  box.innerHTML = '<div class="box">Loading…</div>'; box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const { data, error } = await sb.rpc('ops_rider_review', { p_rider: id });
+  if (error) return box.innerHTML = `<div class="box err">${E(error.message)}</div>`;
+  const r = data.rider, st = r.screening_status, open = st === 'applied' || st === 'more_info', checks = data.checks || [];
+  let photo = '';
+  if (r.selfie_path) { const { data: su } = await sb.storage.from('rider-selfies').createSignedUrl(r.selfie_path, 600); photo = su?.signedUrl || ''; }
+  const [pc, pl] = R_PILL[st] || ['', st];
+  const kv = (k, v, bad) => `<div style="display:flex;gap:8px;padding:4px 0;border-bottom:1px solid var(--b);font-size:.86rem;"><span class="note" style="flex:0 0 150px;">${k}</span><span style="${bad ? 'color:var(--bad);font-weight:700;' : ''}">${v || '<span class="note">not given</span>'}</span></div>`;
+  const date = d => d ? E(dmy(d)) + (expired(d) ? ' · EXPIRED' : '') : '';
+  const chk = c => `<li style="display:flex;gap:8px;align-items:center;padding:5px 0;font-size:.86rem;">
+      ${c.kind === 'manual' && open ? `<input type="checkbox" ${c.ok ? 'checked' : ''} onchange="riderCheck('${r.id}','${c.key}',this.checked)" style="width:18px;height:18px;">` : `<span class="pill ${c.ok ? 'ok' : c.blocks ? 'bad' : 'warn'}" style="min-width:44px;text-align:center;">${c.ok ? 'OK' : c.blocks ? 'NO' : 'CHECK'}</span>`}
+      <span>${E(c.label)}</span>${c.key === 'phone' && !c.ok && open ? ` <button class="btn sec" onclick="riderCheck('${r.id}','phone',true)">I called this number</button>` : ''}</li>`;
+  box.innerHTML = `<div class="box" style="border-color:var(--p);">
+    <div style="display:flex;justify-content:space-between;gap:10px;align-items:start;flex-wrap:wrap;">
+      <div style="display:flex;gap:12px;align-items:center;">${photo ? `<a href="${E(photo)}" target="_blank" rel="noopener"><img src="${E(photo)}" alt="Selfie" style="width:96px;height:96px;object-fit:cover;border-radius:12px;border:1px solid var(--b);"></a>` : '<div class="note">No selfie</div>'}
+        <div><b style="font-size:1.05rem;">${E(r.full_name)}</b> <span class="pill ${pc}">${pl}</span><div class="note">${local(r.phone)} · applied ${E(dmy(r.applied_at)) || 'before screening'}</div>
+        ${r.decision_note ? `<div class="note" style="margin-top:4px;">Last note: ${E(r.decision_note)}</div>` : ''}</div></div>
+      <button class="btn sec" onclick="document.getElementById('r-detail').innerHTML=''">Close</button></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px 24px;margin-top:12px;">
+      <div><b class="note">IDENTITY</b>${kv('Name on card', E(r.full_name))}${kv('Date of birth', E(dmy(r.date_of_birth)))}${kv('Ghana Card number', `<span class="secret">${E(r.ghana_card_number)}</span>`)}
+        ${kv('Lives at', E(r.residential_address))}${kv('Digital address', E(r.digital_address))}${kv('Emergency contact', E([r.emergency_name, local(r.emergency_phone)].filter(Boolean).join(' · ')))}</div>
+      <div><b class="note">VEHICLE AND LICENCE</b>${kv('Vehicle', E(r.vehicle))}${kv('Number plate', E(r.plate_number))}${kv('Licence', E([r.licence_number, r.licence_class && 'class ' + r.licence_class].filter(Boolean).join(' · ')))}
+        ${kv('Licence expires', date(r.licence_expiry), expired(r.licence_expiry))}${kv('Roadworthy expires', date(r.roadworthy_expiry), expired(r.roadworthy_expiry))}${kv('Insurance expires', date(r.insurance_expiry), expired(r.insurance_expiry))}</div>
+      <div><b class="note">GUARANTOR AND PAY</b>${kv('Guarantor', E(r.guarantor_name))}${kv('Guarantor phone', r.guarantor_phone ? `<a href="tel:+${E(r.guarantor_phone)}">${local(r.guarantor_phone)}</a>` : '')}${kv('Relationship', E(r.guarantor_relationship))}
+        ${kv('MoMo number', E(local(r.momo_number)))}${kv('MoMo name', E(r.momo_name))}</div></div>
+    ${(data.same_plate || []).length ? `<div class="err">Same number plate as: ${data.same_plate.map(o => E(o.name) + ' (' + local(o.phone) + ', ' + E(o.status) + ')').join('; ')}</div>` : ''}
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px 24px;margin-top:14px;">
+      <div><b>1. Automatic checks</b><ul style="list-style:none;">${checks.filter(c => c.kind === 'auto').map(chk).join('')}</ul></div>
+      <div><b>2. Identity check with the NIA</b>
+        <p class="note" style="margin:4px 0 8px;line-height:1.45;">Meet the rider with their Ghana Card and run a biometric check (fingerprint or face). Record only the result. Looking at the card, or comparing it with the selfie yourself, does not count.</p>
+        ${r.id_check_result !== 'pending' ? `<div class="pill ${r.id_check_result === 'passed' ? 'ok' : 'bad'}" style="margin-bottom:8px;">${E(r.id_check_result)} · ${E(R_METHOD[r.id_check_method] || '')} · ${E(dmy(r.id_check_at))}${r.id_check_ref ? ' · ref ' + E(r.id_check_ref) : ''}</div>` : ''}
+        ${open ? `<div class="row"><label class="fg">How it was checked<select id="rv-method"><option value="">Choose…</option>${Object.entries(R_METHOD).map(([k, l]) => `<option value="${k}" ${r.id_check_method === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+          <label class="fg">Reference (optional)<input id="rv-ref" value="${E(r.id_check_ref)}" style="width:130px;"></label></div>
+          <div class="row" style="margin-top:8px;"><button class="btn" onclick="riderId('${r.id}','passed')">Passed</button><button class="btn bad" onclick="riderId('${r.id}','failed')">Failed</button>
+          ${r.id_check_result !== 'pending' ? `<button class="btn sec" onclick="riderId('${r.id}','pending')">Clear</button>` : ''}</div>` : ''}</div>
+      <div><b>3. Validation</b><p class="note" style="margin:4px 0;">Tick each one when you have done it.</p><ul style="list-style:none;">${checks.filter(c => c.kind === 'manual').map(chk).join('')}</ul></div></div>
+    <div style="margin-top:14px;border-top:1px solid var(--b);padding-top:12px;"><b>4. Decision</b>
+      ${data.blockers && open ? `<p class="note" style="margin:4px 0;">Still to do before approval: ${E(data.blockers)}</p>` : ''}
+      <div class="row" style="margin-top:8px;">
+        ${open || st === 'suspended' ? `<label class="fg">Areas (none = all)<select id="rv-zones" multiple size="3">${ZONES.map(z => `<option value="${z.id}" ${(r.zone_ids || []).includes(z.id) ? 'selected' : ''}>${E(z.name)}</option>`).join('')}</select></label>` : ''}
+        <label class="fg" style="flex:1;min-width:240px;">Note to the rider (needed to ask for more, reject or suspend)<input id="rv-note" placeholder="e.g. Bring your renewed roadworthy certificate"></label></div>
+      <div class="row" style="margin-top:10px;">
+        ${open ? `<button class="btn gold" onclick="riderDecide('${r.id}','approve')" ${data.blockers ? 'disabled style="opacity:.5"' : ''}>Approve</button><button class="btn sec" onclick="riderDecide('${r.id}','more_info')">Ask for more</button><button class="btn bad" onclick="riderDecide('${r.id}','reject')">Reject</button>` : ''}
+        ${st === 'approved' ? `<button class="btn bad" onclick="riderDecide('${r.id}','suspend')">Suspend</button>` : ''}
+        ${st === 'suspended' ? `<button class="btn gold" onclick="riderDecide('${r.id}','reinstate')">Reinstate</button>` : ''}
+        ${st === 'rejected' ? `<button class="btn sec" onclick="riderDecide('${r.id}','reopen')">Reopen application</button>` : ''}
+        <button class="btn sec" onclick="riderReset('${r.id}')">New password</button></div></div>
+    <details style="margin-top:12px;"><summary class="note" style="cursor:pointer;">History (${(data.events || []).length})</summary>
+      ${(data.events || []).map(e => `<div class="note" style="padding:3px 0;">${new Date(e.at).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · ${E(e.action.replace(/_/g, ' '))} · ${E(e.by)}${e.note ? ' · ' + E(e.note) : ''}</div>`).join('')}</details></div>`;
+}
+async function riderCheck(id, key, ok) { const { error } = await sb.rpc('ops_rider_set_check', { p_rider: id, p_key: key, p_ok: ok }); if (error) fail(error); riderReview(id); }
+async function riderId(id, result) {
+  const { error } = await sb.rpc('ops_rider_id_check', { p_rider: id, p_result: result, p_method: document.getElementById('rv-method').value || null, p_ref: document.getElementById('rv-ref').value });
+  if (error) fail(error); riderReview(id);
+}
+async function riderDecide(id, action) {
+  const ask = { approve: 'Approve this rider? They will be able to go online and take jobs.', reject: 'Reject this application?', suspend: 'Suspend this rider? They go offline now and jobs they have not collected go back to the pool.', reinstate: 'Reinstate this rider?' }[action];
+  if (ask && !confirm(ask)) return;
+  const zs = document.getElementById('rv-zones');
+  const { error } = await sb.rpc('ops_rider_decide', { p_rider: id, p_action: action, p_note: document.getElementById('rv-note').value, p_zone_ids: zs ? [...zs.selectedOptions].map(o => o.value) : null });
+  if (error) return fail(error);
+  await riders(); riderReview(id);
 }
 async function accounts(body) {
   const { data: { session } } = await sb.auth.getSession();
@@ -210,7 +279,6 @@ async function accounts(body) {
     apikey: 'sb_publishable_T6oCd3aRO0OPheQXEkmvRA_nvIhEPcv' }, body: JSON.stringify(body) });
   return res.json().catch(() => ({ error: 'Could not reach the server.' }));
 }
-async function riderActive(id, on) { const { error } = await sb.from('riders').update({ active: on, online: on ? undefined : false }).eq('id', id); if (error) fail(error); riders(); }
 async function riderReset(id) {
   if (!confirm('Give this rider a new password? The old one stops working.')) return;
   const out = await accounts({ action: 'reset_rider_password', rider_id: id });
