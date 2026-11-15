@@ -92,6 +92,24 @@ h2.sec{font-size:1.05rem;margin:22px 0 10px;}
 .status.good{background:#e7f6ee;color:var(--ok);} .status.bad{background:#fdecea;color:var(--bad);}
 .more{display:flex;justify-content:center;margin:6px 0 30px;}
 footer{text-align:center;font-size:.8rem;color:var(--g);padding:24px 0 40px;line-height:1.6;}
+/* "List your shop" page and the band on the home page */
+.join-band{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin:22px 0 34px;padding:16px 18px;border-radius:14px;background:#fbf6ea;border:1px solid #ecd9a8;color:#3d2c06;text-decoration:none;font-size:.92rem;line-height:1.45;}
+.join-band b{display:block;font-size:1rem;}
+.join-go{flex:none;background:var(--p);color:#fff;font-weight:700;border-radius:10px;padding:9px 14px;}
+.join h2.sec{margin-top:26px;}
+.join-steps{list-style:none;padding:0;margin:10px 0;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;counter-reset:st;}
+.join-steps li{background:#fff;border:1px solid var(--b);border-radius:14px;padding:14px 14px 14px 52px;position:relative;font-size:.9rem;line-height:1.45;color:#344054;counter-increment:st;}
+.join-steps li::before{content:counter(st);position:absolute;left:14px;top:13px;width:26px;height:26px;border-radius:50%;background:var(--p);color:#fff;font-weight:800;display:grid;place-items:center;font-size:.85rem;}
+.join-steps b{display:block;color:#111827;margin-bottom:2px;}
+.join-gets{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:10px;margin:10px 0;}
+.join-gets div{background:#fff;border:1px solid var(--b);border-radius:14px;padding:14px;font-size:.88rem;line-height:1.45;color:#344054;}
+.join-gets b{display:block;color:#111827;margin-bottom:2px;}
+.join-price{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin:10px 0;}
+.join-price .box{margin:0;}
+.join-price .amt{font-size:1.6rem;font-weight:800;color:var(--p);margin:4px 0 2px;}
+.join-price .btn{display:block;text-align:center;margin-top:12px;}
+.hero .join-cta{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px;}
+.hero .join-cta a{text-decoration:none;}
 /* pop-up tile linking to nyansatek.food (video made with Remotion) */
 .foodtile{position:fixed;right:16px;bottom:16px;z-index:50;width:220px;border-radius:18px;overflow:hidden;box-shadow:0 14px 34px rgba(0,0,0,.3);transform:translateY(140%);opacity:0;transition:transform .55s cubic-bezier(.16,1,.3,1),opacity .3s;}
 .foodtile:not(.show){visibility:hidden;}
@@ -116,7 +134,7 @@ footer{text-align:center;font-size:.8rem;color:var(--g);padding:24px 0 40px;line
 <main class="wrap" id="app"><div class="empty">Loading…</div></main>
 <footer class="wrap">Every shop on nyansatek.store runs on NYANSATEK POS, so stock is live.<br>
 Delivery by NYANSATEK riders · Pickup at NYANSATEK points · Pay by MoMo or on delivery<br>
-<a href="#/orders" data-link>My orders</a> · <a href="https://nyansatek.systems" target="_blank" rel="noopener">Sell on nyansatek.store</a></footer>
+<a href="#/orders" data-link>My orders</a> · <a href="#/partners" data-link>List your shop</a></footer>
 <div class="foodtile" id="foodtile">
   <a href="https://nyansatek.food" target="_blank" rel="noopener" aria-label="Hungry? Get some food here on nyansatek.food">
     <video muted loop playsinline preload="none" poster="assets/food-tile.jpg" data-src="assets/food-tile.mp4" aria-hidden="true"></video>
@@ -176,7 +194,7 @@ function foodTile() {
   const page = curPath().split('/').filter(Boolean)[0];
   const hiddenAt = store.get('foodTileHidden');
   const dismissed = hiddenAt && Date.now() - hiddenAt < FOOD_TILE_HIDE_MS;
-  if (['cart', 'checkout', 't', 'orders'].includes(page) || dismissed) {
+  if (['cart', 'checkout', 't', 'orders', 'partners'].includes(page) || dismissed) {
     clearTimeout(foodTile.timer); el.classList.remove('show'); v.pause(); return;
   }
   if (el.classList.contains('show')) return;
@@ -216,9 +234,59 @@ async function route() {
   if (path[0] === 'checkout') return checkout(path[1]);
   if (path[0] === 't') return tracking(path[1]);
   if (path[0] === 'orders') return myOrders();
+  if (path[0] === 'partners') return partnersPage();
   app.innerHTML = '<div class="empty">Page not found.</div>';
 }
 function topSlugOf(slug) { const c = REF.cats.find(x => x.slug === slug); if (!c) return null; if (!c.parent_id) return c.slug; return REF.cats.find(x => x.id === c.parent_id)?.slug; }
+
+// ---------- "List your shop" ----------
+// Shops join by buying NYANSATEK POS from this page. Checkout carries source=store, so the account is made
+// with the Online Shop add-on switched on (included) and the request to join nyansatek.store already sent;
+// the NYANSATEK team approves it in /ops.
+const JOIN_CHECKOUT = 'https://nyansatek.systems/checkout.html?product=pos&source=store&plan=';
+const JOIN_WHATSAPP = 'https://wa.me/233536340578?text=' + encodeURIComponent('Hello NYANSATEK, I want to list my shop on nyansatek.store.');
+function partnersPage() {
+  document.title = 'List your shop · nyansatek.store';
+  app.innerHTML = `<div class="join">
+    <div class="hero"><b style="display:block;font-size:1.5rem;line-height:1.2;">Sell on nyansatek.store</b>
+      <p style="max-width:56ch;">Put your shop in front of customers across town. List your products, take every order on NYANSATEK POS
+      with live stock, and let NYANSATEK riders deliver it, or let customers pick up at a NYANSATEK point.</p>
+      <div class="join-cta"><a class="btn" style="background:#fff;color:var(--p);" href="${JOIN_CHECKOUT}standard">Get started · GH₵200 a month</a>
+        <a class="btn" style="background:transparent;border:1px solid rgba(255,255,255,.65);" href="${JOIN_WHATSAPP}" target="_blank" rel="noopener">Ask us on WhatsApp</a></div></div>
+
+    <h2 class="sec">How it works</h2>
+    <ol class="join-steps">
+      <li><b>Sign up for NYANSATEK POS</b>Pay by Mobile Money or card. Your login arrives by SMS and email within minutes.</li>
+      <li><b>Add your products</b>Sign in at nyansatek.shop and add your products with prices and photos. Your online shop is already switched on.</li>
+      <li><b>We approve your shop</b>Your request to join nyansatek.store is sent for you. The NYANSATEK team checks it and lets you know.</li>
+      <li><b>Take orders</b>Orders come into your POS with live stock. Riders collect and deliver, or customers come for it.</li>
+    </ol>
+
+    <h2 class="sec">What you get</h2>
+    <div class="join-gets">
+      <div><b>Listed on nyansatek.store</b>Your products in front of customers shopping across every category.</div>
+      <div><b>Your own online shop page</b>A link you can share on WhatsApp and social media.</div>
+      <div><b>Point of sale with live stock</b>Sell in the shop and online from the same stock, across up to three stores.</div>
+      <div><b>Delivery by NYANSATEK riders</b>Screened riders carry your orders, or customers pick up at a NYANSATEK point.</div>
+      <div><b>Mobile Money, card and cash</b>Customers pay online or on delivery. Receipts by print or SMS.</div>
+      <div><b>Sales and profit reports</b>See what sold, what it cost and what you made, every day.</div>
+    </div>
+
+    <h2 class="sec">What it costs</h2>
+    <div class="join-price">
+      <div class="box"><div class="note">Monthly</div><div class="amt">GH₵200</div><div class="note">per month</div>
+        <a class="btn" href="${JOIN_CHECKOUT}standard">Choose monthly</a></div>
+      <div class="box"><div class="note">Yearly · two months free</div><div class="amt">GH₵2,000</div><div class="note">per year</div>
+        <a class="btn" href="${JOIN_CHECKOUT}yearly">Choose yearly</a></div>
+    </div>
+    <p class="note">The online shop is included when you join from this page. On orders that come through nyansatek.store,
+      NYANSATEK keeps a 5% commission. No setup fee, cancel anytime.</p>
+
+    <div class="box"><b>Already use NYANSATEK POS?</b>
+      <p class="note" style="margin-top:4px;">Sign in at <a href="https://nyansatek.shop" target="_blank" rel="noopener">nyansatek.shop</a>, open Settings → Online Shop,
+      and press <b>Request to join nyansatek.store</b>. Questions? Call or WhatsApp <a href="tel:0536340578">0536 340 578</a>.</p></div>
+  </div>`;
+}
 
 // ---------- listings ----------
 async function listings(args) {
@@ -253,7 +321,9 @@ function home() {
   gridPage('New on nyansatek.store', `<div class="hero has-reel"><div class="hero-t"><b>Shop from trusted local shops, in one place.</b>
     <p>Live stock from every shop. Delivery by NYANSATEK riders or pickup at a NYANSATEK point. Pay by MoMo or when you receive it.</p></div>
     <video class="hero-reel" id="hero-reel" muted loop playsinline preload="metadata" poster="assets/store-reel.jpg" data-reel="assets/store-reel.mp4" aria-label="A short tour: browse live stock, pay by MoMo or on delivery, track your order, or collect at a pickup point"></video></div>
-    <h2 class="sec">Shop by category</h2><div class="cats">${tops.map(t => `<a class="cat" href="#/c/${E(t.slug)}" data-link>${E(t.name)}<small>${REF.cats.filter(s => s.parent_id === t.id).slice(0, 3).map(s => E(s.name)).join(' · ')}</small></a>`).join('')}</div>`, {});
+    <h2 class="sec">Shop by category</h2><div class="cats">${tops.map(t => `<a class="cat" href="#/c/${E(t.slug)}" data-link>${E(t.name)}<small>${REF.cats.filter(s => s.parent_id === t.id).slice(0, 3).map(s => E(s.name)).join(' · ')}</small></a>`).join('')}</div>
+    <a class="join-band" href="#/partners" data-link><span><b>Own a shop?</b>
+      Put your products in front of customers across town.</span><span class="join-go">List your shop →</span></a>`, {});
   playHeroReel();
 }
 // Hero reels (made with Remotion). People who ask for reduced motion see the still poster only.
