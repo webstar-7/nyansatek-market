@@ -92,6 +92,16 @@ h2.sec{font-size:1.05rem;margin:22px 0 10px;}
 .status.good{background:#e7f6ee;color:var(--ok);} .status.bad{background:#fdecea;color:var(--bad);}
 .more{display:flex;justify-content:center;margin:6px 0 30px;}
 footer{text-align:center;font-size:.8rem;color:var(--g);padding:24px 0 40px;line-height:1.6;}
+/* pop-up tile linking to nyansatek.food (video made with Remotion) */
+.foodtile{position:fixed;right:16px;bottom:16px;z-index:50;width:220px;border-radius:18px;overflow:hidden;box-shadow:0 14px 34px rgba(0,0,0,.3);transform:translateY(140%);opacity:0;transition:transform .55s cubic-bezier(.16,1,.3,1),opacity .3s;}
+.foodtile:not(.show){visibility:hidden;}
+.foodtile.show{transform:none;opacity:1;}
+.foodtile a{display:block;}
+.foodtile video{display:block;width:100%;aspect-ratio:1/1;object-fit:cover;background:#c14d0e;}
+.foodtile-x{position:absolute;top:7px;right:7px;width:28px;height:28px;border-radius:50%;border:0;background:rgba(0,0,0,.45);color:#fff;font-size:18px;line-height:28px;padding:0;cursor:pointer;}
+.foodtile-x:hover{background:rgba(0,0,0,.65);}
+@media(max-width:720px){.foodtile{width:170px;right:12px;bottom:12px;}}
+@media(prefers-reduced-motion:reduce){.foodtile{transition:none;}}
 </style>
 </head>
 <body>
@@ -107,6 +117,12 @@ footer{text-align:center;font-size:.8rem;color:var(--g);padding:24px 0 40px;line
 <footer class="wrap">Every shop on nyansatek.store runs on NYANSATEK POS, so stock is live.<br>
 Delivery by NYANSATEK riders · Pickup at NYANSATEK points · Pay by MoMo or on delivery<br>
 <a href="#/orders" data-link>My orders</a> · <a href="https://nyansatek.systems" target="_blank" rel="noopener">Sell on nyansatek.store</a></footer>
+<div class="foodtile" id="foodtile">
+  <a href="https://nyansatek.food" target="_blank" rel="noopener" aria-label="Hungry? Get some food here on nyansatek.food">
+    <video muted loop playsinline preload="none" poster="assets/food-tile.jpg" data-src="assets/food-tile.mp4" aria-hidden="true"></video>
+  </a>
+  <button class="foodtile-x" id="foodtile-x" type="button" aria-label="Close">×</button>
+</div>
 
 <script>
 const SUPABASE_URL = "https://kqwqbohoeltlbwcopeug.supabase.co";
@@ -150,6 +166,34 @@ function addToCart(p, d = 1) {
 }
 
 // ---------- router ----------
+// ---------- pop-up tile for nyansatek.food ----------
+// Shows a few seconds after landing on a browsing page (not cart, checkout, tracking or my orders).
+// Closing it hides it for a day on this device.
+const FOOD_TILE_HIDE_MS = 24 * 3600 * 1000;
+function foodTile() {
+  const el = document.getElementById('foodtile'); if (!el) return;
+  const v = el.querySelector('video');
+  const page = curPath().split('/').filter(Boolean)[0];
+  const hiddenAt = store.get('foodTileHidden');
+  const dismissed = hiddenAt && Date.now() - hiddenAt < FOOD_TILE_HIDE_MS;
+  if (['cart', 'checkout', 't', 'orders'].includes(page) || dismissed) {
+    clearTimeout(foodTile.timer); el.classList.remove('show'); v.pause(); return;
+  }
+  if (el.classList.contains('show')) return;
+  clearTimeout(foodTile.timer);
+  foodTile.timer = setTimeout(() => {
+    el.classList.add('show');
+    if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      if (!v.getAttribute('src')) v.src = v.dataset.src;
+      v.play().catch(() => {});
+    }
+  }, 4000);
+}
+document.getElementById('foodtile-x').addEventListener('click', () => {
+  store.set('foodTileHidden', Date.now());
+  const el = document.getElementById('foodtile'); el.classList.remove('show'); el.querySelector('video').pause();
+});
+
 // GitHub Pages hosting: addresses use #, e.g. nyansatek.store/#/c/drinks
 function go(path) { if (location.hash === '#' + path) route(); else location.hash = '#' + path; }
 window.addEventListener('hashchange', () => { route(); window.scrollTo(0, 0); });
@@ -159,6 +203,7 @@ document.getElementById('q').addEventListener('keydown', e => { if (e.key === 'E
 
 async function route() {
   await REF.ready;
+  foodTile();
   const path = curPath().split('/').filter(Boolean).map(decodeURIComponent);
   document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('on', path[0] === 'c' && topSlugOf(path[1]) === a.dataset.slug));
   clearTimeout(trackTimer);
