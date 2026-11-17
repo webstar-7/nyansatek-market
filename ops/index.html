@@ -50,15 +50,36 @@ const ago = t => { const m = Math.round((Date.now() - new Date(t)) / 60000); ret
 const VEH = ['motorbike', 'car', 'van', 'truck'], RANK = { motorbike: 1, car: 2, van: 3, truck: 4 };
 const app = document.getElementById('app');
 const TABS = [['orders', 'Orders'], ['desk', 'Pickup desk'], ['cash', 'Cash'], ['shops', 'Shops'], ['riders', 'Riders'], ['zones', 'Zones & fees'], ['points', 'Pickup points'], ['cats', 'Categories'], ['billing', 'Billing'], ['team', 'Team']];
-let TAB = location.hash.slice(1) || 'orders', timer = null;
+let TAB = location.hash.slice(1) || 'orders', timer = null, IS_MASTER = false;
 const fail = e => alert(e?.message || String(e));
 
 async function start() {
   const { data: { session } } = await sb.auth.getSession();
   if (!session) return login();
   const { data: ok } = await sb.rpc('is_market_ops');
-  if (ok !== true) { await sb.auth.signOut(); return login('This login is not a NYANSATEK team account.'); }
-  shell(session.user.email);
+  if (ok !== true) { await sb.auth.signOut(); return login('This login is not a NYANSATEK team account, or it has been switched off.'); }
+  const { data: me } = await sb.from('profiles').select('role,must_change_password,full_name').eq('id', session.user.id).maybeSingle();
+  IS_MASTER = me?.role === 'master';
+  if (me?.role === 'market_ops' && me.must_change_password) return choosePassword(session.user.email);
+  if (!IS_MASTER && TAB === 'team') TAB = 'orders';
+  shell(session.user.email, me?.full_name);
+}
+function choosePassword(email) {
+  app.innerHTML = `<div class="card"><h2>Choose your password</h2>
+    <p class="note" style="margin-bottom:12px;">Welcome${email ? ', ' + E(email) : ''}. Pick a private password only you know. You'll use it with your email to sign in from now on.</p>
+    <div class="fg">New password (at least 8 characters)<input id="np1" type="password" autocomplete="new-password"></div><br>
+    <div class="fg">Type it again<input id="np2" type="password" autocomplete="new-password"></div>
+    <div class="err" id="err"></div><button class="btn gold" id="go" style="width:100%;padding:11px;">Save password</button></div>`;
+  document.getElementById('go').onclick = async () => {
+    const a = document.getElementById('np1').value, b = document.getElementById('np2').value, err = document.getElementById('err');
+    if (a.length < 8) return err.textContent = 'Use at least 8 characters.';
+    if (a !== b) return err.textContent = 'The two passwords are different.';
+    const go = document.getElementById('go'); go.disabled = true; go.textContent = 'Saving…';
+    const { error } = await sb.auth.updateUser({ password: a });
+    if (error) { go.disabled = false; go.textContent = 'Save password'; return err.textContent = /weak|pwned|leak|common/i.test(error.message) ? 'That password is too common. Choose a different one.' : /different|same/i.test(error.message) ? 'Choose a password different from the one you were given.' : error.message; }
+    await sb.rpc('ops_password_changed');
+    start();
+  };
 }
 function login(msg) {
   app.innerHTML = `<div class="card"><h2>NYANSATEK team</h2>
@@ -73,15 +94,15 @@ function login(msg) {
     start();
   };
 }
-function shell(email) {
-  app.innerHTML = `<header><b>nyansatek<span>.store</span> · team</b><span class="note" style="color:#cbd5e1">${E(email)} · <a href="#" style="color:#fff" onclick="sb.auth.signOut().then(()=>login());return false;">Sign out</a></span></header>
-    <nav>${TABS.map(([k, l]) => `<button data-k="${k}" class="${TAB === k ? 'on' : ''}">${l}</button>`).join('')}</nav><main id="main"></main>`;
+function shell(email, name) {
+  app.innerHTML = `<header><b>nyansatek<span>.store</span> · team</b><span class="note" style="color:#cbd5e1">${E(name ? name + ' (' + email + ')' : email)} · <a href="#" style="color:#fff" onclick="sb.auth.signOut().then(()=>login());return false;">Sign out</a></span></header>
+    <nav>${TABS.filter(([k]) => k !== 'team' || IS_MASTER).map(([k, l]) => `<button data-k="${k}" class="${TAB === k ? 'on' : ''}">${l}</button>`).join('')}</nav><main id="main"></main>`;
   app.querySelectorAll('nav button').forEach(b => b.onclick = () => { TAB = b.dataset.k; location.hash = TAB; app.querySelectorAll('nav button').forEach(x => x.classList.toggle('on', x === b)); show(); });
   show();
 }
 function show() {
   clearInterval(timer);
-  const fn = { orders, desk, cash, shops, riders, zones, points, cats, billing, team }[TAB] || orders;
+  const fn = { orders, desk, cash, shops, riders, zones, points, cats, billing, team: IS_MASTER ? team : orders }[TAB] || orders;
   fn(); if (TAB === 'orders' || TAB === 'cash') timer = setInterval(fn, 20000);
 }
 const M = () => document.getElementById('main');
@@ -389,15 +410,46 @@ async function confirmStmt(id, paid) {
   const { error } = await sb.rpc('ops_confirm_statement', { p_statement: id, p_paid: paid }); if (error) fail(error); billing();
 }
 
-// ---------- team ----------
-function team() {
-  M().innerHTML = `<h2>Team members</h2><div class="box"><p class="note" style="margin-bottom:8px;">Team members can use this dashboard: orders, pickup desk, cash, shops, riders and settings.</p>
-    <div class="row"><label class="fg">Name<input id="t-name"></label><label class="fg">Email<input id="t-email" type="email"></label><button class="btn gold" id="t-go">Create login</button></div>
-    <div id="t-out" style="margin-top:8px;"></div></div>`;
+// ---------- team (master account only) ----------
+async function team() {
+  const { data, error } = await sb.rpc('ops_team_list');
+  if (error) return M().innerHTML = `<div class="err">${E(error.message)}</div>`;
+  const rows = data || []; TEAM = Object.fromEntries(rows.map(r => [r.id, r.full_name]));
+  M().innerHTML = `<h2>Team members</h2>
+    <div class="box"><p class="note" style="margin-bottom:8px;">Give each person their own login. They sign in at <b>nyansatek.store/ops/</b> with their email and choose a private password the first time. Team members can use every tab except this one; only your master login can add, reset or switch off team accounts.</p>
+    <div class="row"><label class="fg">Full name<input id="t-name"></label><label class="fg">Email<input id="t-email" type="email"></label><button class="btn gold" id="t-go">Create login</button></div>
+    <div id="t-out" style="margin-top:8px;"></div></div>
+    ${rows.length ? `<table><tr><th>Name</th><th>Email (their login)</th><th>Status</th><th>Last signed in</th><th></th></tr>${rows.map(r => `<tr>
+      <td><b>${E(r.full_name)}</b></td><td>${E(r.email)}</td>
+      <td>${r.is_active ? (r.must_change_password ? '<span class="pill warn">Not signed in yet</span>' : '<span class="pill ok">Active</span>') : '<span class="pill bad">Switched off</span>'}</td>
+      <td>${r.last_sign_in_at ? new Date(r.last_sign_in_at).toLocaleString() : '—'}</td>
+      <td style="white-space:nowrap"><button class="btn sec" onclick="resetMember('${r.id}')">New password</button>
+        ${r.is_active ? `<button class="btn bad" onclick="setMember('${r.id}',false)">Switch off</button>` : `<button class="btn sec" onclick="setMember('${r.id}',true)">Switch on</button>`}</td></tr>`).join('')}</table>`
+      : '<div class="empty">No team members yet.</div>'}`;
   document.getElementById('t-go').onclick = async () => {
+    const btn = document.getElementById('t-go'); btn.disabled = true;
     const out = await accounts({ action: 'create_team_member', full_name: document.getElementById('t-name').value, email: document.getElementById('t-email').value });
-    document.getElementById('t-out').innerHTML = out.error ? `<div class="err">${E(out.error)}</div>` : `Created. Login <span class="secret">${E(out.login)}</span> password <span class="secret">${E(out.password)}</span> at <b>nyansatek.store/ops/</b>. Shown once.`;
+    btn.disabled = false;
+    if (out.error) return document.getElementById('t-out').innerHTML = `<div class="err">${E(out.error)}</div>`;
+    await team();
+    document.getElementById('t-out').innerHTML = handover(out);
   };
+}
+const handover = out => `<div class="box" style="background:#fffbea;border-color:#f3dc9b;margin:0;"><b>Give these to the team member (shown once):</b><br>
+  Website: <b>nyansatek.store/ops/</b><br>Email: <span class="secret">${E(out.login)}</span><br>Temporary password: <span class="secret">${E(out.password)}</span><br>
+  <span class="note">They will be asked to choose their own password when they first sign in.</span></div>`;
+let TEAM = {};
+async function resetMember(id) {
+  const name = TEAM[id] || 'this team member';
+  if (!confirm('Give ' + name + ' a new temporary password? Their current password stops working.')) return;
+  const out = await accounts({ action: 'reset_team_password', member_id: id });
+  if (out.error) return fail(out.error);
+  await team(); document.getElementById('t-out').innerHTML = handover(out);
+}
+async function setMember(id, on) {
+  const name = TEAM[id] || 'this team member';
+  if (!on && !confirm('Switch off ' + name + '? They will not be able to use the dashboard until you switch them back on.')) return;
+  const { error } = await sb.rpc('ops_team_set_active', { p_id: id, p_active: on }); if (error) return fail(error); team();
 }
 
 start();
