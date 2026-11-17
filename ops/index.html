@@ -62,12 +62,14 @@ async function start() {
 }
 function login(msg) {
   app.innerHTML = `<div class="card"><h2>NYANSATEK team</h2>
-    <div class="fg">Email<input id="em" type="email" autocomplete="username"></div><br>
+    <div class="fg">Email or business name<input id="em" type="text" autocomplete="username" placeholder="e.g. NYANSATEK"></div><br>
     <div class="fg">Password<input id="pw" type="password" autocomplete="current-password"></div>
     <div class="err" id="err">${E(msg || '')}</div><button class="btn gold" id="go" style="width:100%;padding:11px;">Sign in</button></div>`;
   document.getElementById('go').onclick = async () => {
-    const { error } = await sb.auth.signInWithPassword({ email: document.getElementById('em').value.trim(), password: document.getElementById('pw').value });
-    if (error) return document.getElementById('err').textContent = 'Email or password is wrong.';
+    let email = document.getElementById('em').value.trim();
+    if (!email.includes('@')) { const { data } = await sb.rpc('resolve_login_email', { p_login: email }); email = data || ''; }
+    const { error } = email ? await sb.auth.signInWithPassword({ email, password: document.getElementById('pw').value }) : { error: true };
+    if (error) return document.getElementById('err').textContent = 'Email / business name or password is wrong.';
     start();
   };
 }
