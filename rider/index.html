@@ -293,6 +293,7 @@ function jobHtml(j, mode) {
   return `<div class="job"><div class="top"><span><b style="color:#111827">${E(j.code)}</b> · ${E(KIND[j.kind])} · ${E(j.vehicle)}</span><span class="fee">${GH(j.fee)}</span></div>
     ${placeHtml('#d1a03a', 'From', j.from, full)}${placeHtml('#127a46', 'To', j.to, full)}
     <div style="font-size:.85rem;color:var(--g);margin-top:8px;">${j.items} item${j.items === 1 ? '' : 's'}${mode === 'done' ? ' · done' : j.order_status === 'cancelled' ? ' · <b style="color:var(--bad)">order cancelled</b>' : ''}</div>
+    ${j.age_check && mode !== 'done' && j.kind === 'to_customer' ? `<div class="cash" style="background:#fdecea;border-color:#f1c0bb;color:#8a1c12;"><b>18+ order: contains alcohol.</b> Check the customer's ID before handing it over. If they look under 18 and can't show ID, don't deliver: bring it back and call NYANSATEK.</div>` : ''}
     ${j.collect_cash > 0 && mode !== 'done' ? `<div class="cash">Collect <b>${GH(j.collect_cash)}</b> cash from the customer. Keep your ${GH(j.fee)} fee and give <b>${GH(j.collect_cash - j.fee)}</b> to the shop.</div>` : ''}
     ${j.payment_method === 'momo' && j.kind === 'to_customer' && mode !== 'done' ? '<div class="cash" style="background:#e7f6ee;border-color:#b7e4c7;">Already paid by MoMo. Collect nothing.</div>' : ''}
     ${acts ? `<div class="acts">${acts}</div>` : ''}</div>`;

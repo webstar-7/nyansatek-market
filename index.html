@@ -120,6 +120,7 @@ footer{text-align:center;font-size:.8rem;color:var(--g);padding:24px 0 40px;line
 .foodtile-x:hover{background:rgba(0,0,0,.65);}
 @media(max-width:720px){.foodtile{width:170px;right:12px;bottom:12px;}}
 @media(prefers-reduced-motion:reduce){.foodtile{transition:none;}}
+.age{display:flex;gap:8px;align-items:flex-start;background:#fff7e6;border:1px solid #f3dc9b;border-radius:10px;padding:10px 12px;margin:12px 0;font-size:.88rem;cursor:pointer;}.age input{margin-top:3px;}
 </style>
 </head>
 <body>
@@ -410,12 +411,16 @@ function cartPage() {
   app.querySelectorAll('.qty button').forEach(btn => btn.onclick = () => { addToCart(CART[btn.dataset.org].items[btn.dataset.id].p, Number(btn.dataset.d)); cartPage(); });
 }
 
+// alcohol (Beer, wine & spirits and anything under it) needs an 18+ confirmation at checkout
+const isAlcohol = p => { const c = REF.cats.find(x => x.id === p.category_id); if (!c) return false;
+  const top = c.parent_id ? REF.cats.find(x => x.id === c.parent_id) : c; return (top || c).slug === 'beer-wine-spirits' || c.slug === 'beer-wine-spirits'; };
 function checkout(org) {
   const c = CART[org];
   if (!c) { go('/cart'); return; }
   const items = Object.values(c.items);
   let veh = 'motorbike'; items.forEach(i => { if (RANK[i.p.delivery_size] > RANK[veh]) veh = i.p.delivery_size; });
   const goods = items.reduce((a, i) => a + i.qty * Number(i.p.price), 0), truck = veh === 'truck';
+  const alc = items.some(i => isAlcohol(i.p));
   const saved = store.get('buyer') || {};
   document.title = 'Checkout · nyansatek.store';
   app.innerHTML = `<h1>Checkout: ${E(c.shop.name)}</h1><div class="box" style="max-width:620px;">
@@ -436,6 +441,7 @@ function checkout(org) {
       <label class="${truck ? 'dis' : ''}"><input type="radio" name="pay" value="pod" ${truck ? 'disabled' : 'checked'}> Pay when you receive it</label></div>
       ${truck ? '<p class="note">This order needs a truck, so it must be paid by MoMo first.</p>' : ''}</div>
     <div class="fg"><label>Note for the shop (optional)</label><textarea id="c-note" rows="2" maxlength="300"></textarea></div>
+    ${alc ? `<label class="age"><input type="checkbox" id="c-age"> <span><b>I am 18 or older.</b> This order has alcohol. I'll show ID to the rider if asked.</span></label>` : ''}
     <div class="sum" id="c-sum"></div><div class="err" id="c-err"></div>
     <button class="btn gold" style="width:100%;" id="c-go">Place order</button>
     <p class="note" style="margin-top:8px;">The shop confirms within 10 minutes. You'll get a tracking link and SMS updates.</p></div>`;
@@ -457,9 +463,10 @@ function checkout(org) {
     const s = state(), err = document.getElementById('c-err'), btn = document.getElementById('c-go'), v = id => document.getElementById(id).value.trim();
     err.textContent = '';
     if (!s.pay) { err.textContent = 'Choose how you will pay.'; return; }
+    if (alc && !document.getElementById('c-age').checked) { err.textContent = 'This order has alcohol. Tick the box to confirm you are 18 or older.'; return; }
     if (s.ful === 'delivery' && s.zone && s.fee == null) { err.textContent = 'Delivery by ' + veh + ' is not available in this area yet. Try pickup.'; return; }
     const p = { channel: 'market', org_id: org, items: items.map(i => ({ product_id: i.p.id, qty: i.qty })),
-      customer: { name: v('c-name'), phone: v('c-phone') }, fulfilment: s.ful, payment_method: s.pay, note: v('c-note') };
+      customer: { name: v('c-name'), phone: v('c-phone') }, fulfilment: s.ful, payment_method: s.pay, note: v('c-note'), age_confirmed: alc };
     if (s.ful === 'delivery') Object.assign(p, { zone_id: s.zone, address: v('c-addr'), landmark: v('c-land') }); else p.pickup_point_id = v('c-point');
     btn.disabled = true; btn.textContent = 'Placing order…';
     const { data, error } = await sb.rpc('place_online_order', { p });
