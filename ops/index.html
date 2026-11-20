@@ -116,7 +116,7 @@ const tel = p => p ? `<a href="tel:${local(p)}">${local(p)}</a>` : '';
 async function orders() {
   const since = new Date(Date.now() - 864e5).toISOString();
   const [{ data, error }, { data: cs }] = await Promise.all([
-    sb.from('online_orders').select('*,organizations(business_name,vertical,shop_online_settings(shop_phone,whatsapp_number,shop_address)),pickup_points(name),delivery_zones(name),couriers(name,phone,company),online_order_items(qty,name_snapshot)')
+    sb.from('online_orders').select('*,organizations(business_name,vertical,shop_online_settings(shop_phone,whatsapp_number,shop_address)),pickup_points(name),delivery_zones(name),couriers(name,phone,company),online_order_items(qty,name_snapshot),online_checkouts(code,total)')
       .or(`status.in.(placed,accepted,ready,in_transit,at_pickup_point,returning),created_at.gte.${since}`).order('created_at', { ascending: false }).limit(300),
     sb.from('couriers').select('id,name,company,phone').eq('active', true).order('company').order('name')]);
   if (error) return M().innerHTML = `<div class="err">${E(error.message)}</div>`;
@@ -131,7 +131,7 @@ async function orders() {
   const step = o => o.status === 'placed' ? (paid(o) ? ['warn', 'paid · call the shop'] : ['warn', 'waiting for payment'])
     : ({ accepted: ['', 'confirmed · send a courier'], ready: ['', 'ready · send a courier'], in_transit: ['', 'on the way'], at_pickup_point: ['', 'at pickup point'],
          delivered: ['ok', 'delivered'], collected: ['ok', 'collected'], completed: ['ok', 'completed'], cancelled: ['bad', 'cancelled'], returning: ['bad', 'returning'], returned: ['bad', 'returned'] })[o.status] || ['', o.status];
-  const act = (o, a, label, cls = '') => `<button class="btn ${cls}" onclick="orderAction('${o.id}','${a}','${E(o.code)}')">${label}</button>`;
+  const act = (o, a, label, cls = '') => `<button class="btn ${cls}" onclick="orderAction('${o.id}','${a}','${E(o.online_checkouts && a === 'paid' ? o.online_checkouts.code : o.code)}')">${label}</button>`;
   const tr = o => {
     const sh = shopOf(o), open = live.includes(o), [pc, pt] = step(o);
     let actions = '';
@@ -142,23 +142,24 @@ async function orders() {
     else if (['in_transit', 'at_pickup_point'].includes(o.status)) actions = act(o, 'delivered', o.fulfilment === 'pickup' ? 'Collected' : 'Delivered', 'gold') + (o.courier_id ? ` <button class="btn sec" onclick="orderSms('${o.id}','courier')">SMS courier</button>` : '');
     const courierSel = open && o.fulfilment === 'delivery' && o.status !== 'in_transit'
       ? `<select onchange="setCourier('${o.id}',this.value)"><option value="">${o.courier_id ? 'Remove courier' : 'Choose courier…'}</option>${COURIERS.map(c => `<option value="${c.id}" ${c.id === o.courier_id ? 'selected' : ''}>${E(c.company && c.company !== c.name ? c.company + ' · ' + c.name : c.name)}</option>`).join('')}</select>` : '';
-    return `<tr class="${late(o) ? 'late' : ''}"><td><b>${E(o.code)}</b><div class="note">${ago(o.created_at)} ago · ${o.channel === 'market' ? (o.organizations?.vertical === 'food' ? 'nyansatek.food' : 'nyansatek.store') : 'own page'}</div></td>
+    const ck = o.online_checkouts;
+    return `<tr class="${late(o) ? 'late' : ''}"><td><b>${E(o.code)}</b>${ck ? `<div class="note"><b>Basket ${E(ck.code)}</b></div>` : ''}<div class="note">${ago(o.created_at)} ago · ${o.channel === 'market' ? (o.organizations?.vertical === 'food' ? 'nyansatek.food' : 'nyansatek.store') : 'own page'}</div></td>
       <td>${E(o.organizations?.business_name)}<div class="note">${tel(sh.shop_phone || sh.whatsapp_number)}</div></td>
       <td>${(o.online_order_items || []).map(i => `${i.qty} × ${E(i.name_snapshot)}`).join('<br>')}${o.customer_note ? `<div class="note">Note: ${E(o.customer_note)}</div>` : ''}</td>
       <td>${E(o.customer_name)}<div class="note">${tel(o.customer_phone)}</div>${o.fulfilment === 'delivery' ? `<div class="note">${E(o.address || '')}${o.landmark ? ' · ' + E(o.landmark) : ''}${o.delivery_zones?.name ? ' · ' + E(o.delivery_zones.name) : ''}</div>` : `<div class="note">Pickup · ${E(o.pickup_points?.name || '')}</div>`}</td>
-      <td><b>${GH(o.goods_total)}</b><div class="note">${paid(o) ? 'MoMo ✓' : 'MoMo not yet'}${o.momo_txn_id ? ' · ID ' + E(o.momo_txn_id) : ''}</div><div class="note">Shop gets ${GH(o.base_total ?? o.goods_total)}</div></td>
+      <td><b>${GH(o.goods_total)}</b><div class="note">${paid(o) ? 'MoMo ✓' : 'MoMo not yet'}${o.momo_txn_id ? ' · ID ' + E(o.momo_txn_id) : ''}</div>${ck && !paid(o) ? `<div class="note">Look for <b>${GH(ck.total)}</b> for ${E(ck.code)}</div>` : ''}<div class="note">Shop gets ${GH(o.base_total ?? o.goods_total)}</div></td>
       <td><span class="pill ${pc}">${E(pt)}</span>${o.status === 'placed' && !paid(o) ? `<div class="note">${minsLeft(o)} min left to pay</div>` : ''}${o.cancel_reason && o.status === 'cancelled' ? `<div class="note">${E(o.cancel_reason)}${paid(o) ? ' · refund the MoMo' : ''}</div>` : ''}</td>
       <td>${o.couriers ? `${E(o.couriers.name)}<div class="note">${tel(o.couriers.phone)}</div>` : ''}${courierSel}</td>
       <td><div style="display:flex;gap:4px;flex-wrap:wrap;">${actions}${open ? ` <button class="btn bad" onclick="cancelOrder('${o.id}','${E(o.code)}')">Cancel</button>` : ''}</div></td></tr>`;
   };
   const table = list => list.length ? `<table><tr><th>Order</th><th>Shop / restaurant</th><th>Items</th><th>Customer</th><th>Paid</th><th>Status</th><th>Courier</th><th></th></tr>${list.map(tr).join('')}</table>` : '<div class="empty">None.</div>';
-  M().innerHTML = `<h2>Live orders (${live.length})</h2><p class="note" style="margin-bottom:8px;">1. Check the MoMo and press <b>Payment received</b>. 2. Call the shop to place the order, then <b>Shop confirmed</b>.
+  M().innerHTML = `<h2>Live orders (${live.length})</h2><p class="note" style="margin-bottom:8px;">A customer's basket (NC…) is split into one order per shop (NS…); one MoMo payment covers the basket. 1. Check the MoMo and press <b>Payment received</b>. 2. Call the shop to place the order, then <b>Shop confirmed</b>.
     3. Choose a courier and call them. 4. <b>On the way</b>, then <b>Delivered</b>. SMS buttons are optional and cost SMS credit. Highlighted: needs attention. Refreshes every 20 seconds.</p>${table(live)}
     <h2 style="margin-top:20px;">Finished in the last 24 hours (${finished.length})</h2>${table(finished)}`;
 }
 async function orderAction(id, action, code) {
   let note = null;
-  if (action === 'paid') { note = prompt(`Payment for ${code} is in NYANSATEK's MoMo? Enter the MoMo transaction ID (optional):`, ''); if (note === null) return; }
+  if (action === 'paid') { note = prompt(`Payment for ${code} is in NYANSATEK's MoMo?${code.startsWith('NC') ? ' This marks every part of the basket as paid.' : ''} Enter the MoMo transaction ID (optional):`, ''); if (note === null) return; }
   if (action === 'delivered' && !confirm(`Mark ${code} as delivered? The shop's sale is recorded and it is added to today's payouts.`)) return;
   const { error } = await sb.rpc('ops_order_action', { p_order: id, p_action: action, p_note: note }); if (error) fail(error); orders();
 }
