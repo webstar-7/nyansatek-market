@@ -49,7 +49,7 @@ const local = p => p ? '0' + String(p).slice(3) : '';
 const ago = t => { const m = Math.round((Date.now() - new Date(t)) / 60000); return m < 60 ? m + ' min' : Math.round(m / 60) + ' h'; };
 const VEH = ['motorbike', 'car', 'van', 'truck'], RANK = { motorbike: 1, car: 2, van: 3, truck: 4 };
 const app = document.getElementById('app');
-const TABS = [['orders', 'Orders'], ['couriers', 'Couriers'], ['payouts', 'Payouts'], ['shops', 'Shops & restaurants'], ['desk', 'Pickup desk'], ['riders', 'Rider app'], ['zones', 'Zones'], ['points', 'Pickup points'], ['cats', 'Categories'], ['billing', 'Settings'], ['team', 'Team']];
+const TABS = [['orders', 'Orders'], ['couriers', 'Couriers'], ['payouts', 'Payouts'], ['refunds', 'Refunds'], ['menus', 'Menus'], ['shops', 'Shops & restaurants'], ['desk', 'Pickup desk'], ['riders', 'Rider app'], ['zones', 'Zones'], ['points', 'Pickup points'], ['cats', 'Categories'], ['billing', 'Settings'], ['team', 'Team']];
 let TAB = location.hash.slice(1) || 'orders', timer = null, IS_MASTER = false;
 const fail = e => alert(e?.message || String(e));
 
@@ -98,11 +98,37 @@ function shell(email, name) {
   app.innerHTML = `<header><b>nyansatek<span>.store</span> · team</b><span class="note" style="color:#cbd5e1">${E(name ? name + ' (' + email + ')' : email)} · <a href="#" style="color:#fff" onclick="sb.auth.signOut().then(()=>login());return false;">Sign out</a></span></header>
     <nav>${TABS.filter(([k]) => k !== 'team' || IS_MASTER).map(([k, l]) => `<button data-k="${k}" class="${TAB === k ? 'on' : ''}">${l}</button>`).join('')}</nav><main id="main"></main>`;
   app.querySelectorAll('nav button').forEach(b => b.onclick = () => { TAB = b.dataset.k; location.hash = TAB; app.querySelectorAll('nav button').forEach(x => x.classList.toggle('on', x === b)); show(); });
-  show();
+  show(); watchOrders();
+}
+
+// ---------- alerts: sound, browser notification and tab title for new orders and new MoMo IDs, on any tab ----------
+let SEEN = null, BASE_TITLE = document.title;
+function beep() {
+  try { const a = new (window.AudioContext || window.webkitAudioContext)(); [0, .25, .5].forEach(t => { const o = a.createOscillator(), g = a.createGain();
+    o.frequency.value = 880; g.gain.value = .2; o.connect(g); g.connect(a.destination); o.start(a.currentTime + t); o.stop(a.currentTime + t + .15); }); } catch (e) {}
+}
+async function watchOrders() {
+  const check = async () => {
+    const { data } = await sb.from('online_orders').select('id,code,momo_txn_id,payment_confirmed_at').eq('status', 'placed');
+    const keys = new Set((data || []).map(o => o.id + ':' + (o.momo_txn_id || '')));
+    const waiting = (data || []).length;
+    document.title = waiting ? `(${waiting}) ${BASE_TITLE}` : BASE_TITLE;
+    if (SEEN) {
+      const fresh = (data || []).filter(o => !SEEN.has(o.id + ':' + (o.momo_txn_id || '')));
+      if (fresh.length) {
+        beep();
+        const msg = fresh.map(o => o.code + (o.momo_txn_id ? ' · MoMo ID sent' : ' · new order')).join(', ');
+        try { if (window.Notification && Notification.permission === 'granted') new Notification('NYANSATEK orders', { body: msg }); } catch (e) {}
+        if (TAB === 'orders') orders();
+      }
+    }
+    SEEN = keys;
+  };
+  check(); setInterval(check, 15000);
 }
 function show() {
   clearInterval(timer);
-  const fn = { orders, couriers, payouts, desk, cash, shops, riders, zones, points, cats, billing, team: IS_MASTER ? team : orders }[TAB] || orders;
+  const fn = { orders, couriers, payouts, refunds, menus, desk, cash, shops, riders, zones, points, cats, billing, team: IS_MASTER ? team : orders }[TAB] || orders;
   fn(); if (TAB === 'orders') timer = setInterval(() => { if (!document.querySelector('#main select:focus')) fn(); }, 20000);
 }
 const M = () => document.getElementById('main');
@@ -153,7 +179,7 @@ async function orders() {
       <td><div style="display:flex;gap:4px;flex-wrap:wrap;">${actions}${open ? ` <button class="btn bad" onclick="cancelOrder('${o.id}','${E(o.code)}')">Cancel</button>` : ''}</div></td></tr>`;
   };
   const table = list => list.length ? `<table><tr><th>Order</th><th>Shop / restaurant</th><th>Items</th><th>Customer</th><th>Paid</th><th>Status</th><th>Courier</th><th></th></tr>${list.map(tr).join('')}</table>` : '<div class="empty">None.</div>';
-  M().innerHTML = `<h2>Live orders (${live.length})</h2><p class="note" style="margin-bottom:8px;">A customer's basket (NC…) is split into one order per shop (NS…); one MoMo payment covers the basket. 1. Check the MoMo and press <b>Payment received</b>. 2. Call the shop to place the order, then <b>Shop confirmed</b>.
+  M().innerHTML = `${window.Notification && Notification.permission === 'default' ? '<div class="box"><b>Get alerts for new orders</b> <button class="btn gold" onclick="Notification.requestPermission().then(()=>orders())">Turn on alerts</button> <span class="note">Keep this page open: it beeps and notifies you when an order comes in or a customer sends a MoMo ID.</span></div>' : ''}<h2>Live orders (${live.length})</h2><p class="note" style="margin-bottom:8px;">A customer's basket (NC…) is split into one order per shop (NS…); one MoMo payment covers the basket. 1. Check the MoMo and press <b>Payment received</b>. 2. Call the shop to place the order, then <b>Shop confirmed</b>.
     3. Choose a courier and call them. 4. <b>On the way</b>, then <b>Delivered</b>. SMS buttons are optional and cost SMS credit. Highlighted: needs attention. Refreshes every 20 seconds.</p>${table(live)}
     <h2 style="margin-top:20px;">Finished in the last 24 hours (${finished.length})</h2>${table(finished)}`;
 }
@@ -198,6 +224,98 @@ async function couriers() {
     const { error } = await sb.from('couriers').insert({ name: v('k-name'), company: v('k-co') || null, phone, notes: v('k-notes') || null });
     if (error) fail(error); couriers();
   };
+}
+
+// ---------- refunds: paid orders that were cancelled ----------
+async function refunds() {
+  const since = new Date(Date.now() - 30 * 864e5).toISOString();
+  const { data, error } = await sb.from('online_orders').select('id,code,customer_name,customer_phone,goods_total,cancel_reason,cancelled_at,refund_status,refund_ref,refunded_at,momo_txn_id,organizations(business_name),online_checkouts(code)')
+    .in('refund_status', ['due', 'refunded']).or(`refund_status.eq.due,refunded_at.gte.${since}`).order('cancelled_at', { ascending: false }).limit(200);
+  if (error) return M().innerHTML = `<div class="err">${E(error.message)}</div>`;
+  const due = (data || []).filter(o => o.refund_status === 'due'), done = (data || []).filter(o => o.refund_status === 'refunded');
+  const row = o => `<tr><td><b>${E(o.code)}</b>${o.online_checkouts ? `<div class="note">Basket ${E(o.online_checkouts.code)}</div>` : ''}</td><td>${E(o.organizations?.business_name)}</td>
+    <td>${E(o.customer_name)}<div class="note">${tel(o.customer_phone)}</div></td><td><b>${GH(o.goods_total)}</b>${o.momo_txn_id ? `<div class="note">Paid with ID ${E(o.momo_txn_id)}</div>` : ''}</td>
+    <td class="note">${E(o.cancel_reason || '')}<div>${o.cancelled_at ? new Date(o.cancelled_at).toLocaleString() : ''}</div></td>
+    <td>${o.refund_status === 'due' ? `<button class="btn gold" onclick="markRefunded('${o.id}','${E(o.code)}','${E(GH(o.goods_total))}')">Refunded</button>` : `<span class="pill ok">refunded</span><div class="note">${E(o.refund_ref || '')} · ${new Date(o.refunded_at).toLocaleString()}</div>`}</td></tr>`;
+  const table = list => list.length ? `<table><tr><th>Order</th><th>Shop / restaurant</th><th>Customer</th><th>Amount</th><th>Why cancelled</th><th></th></tr>${list.map(row).join('')}</table>` : '<div class="empty">None.</div>';
+  M().innerHTML = `<h2>Refunds due (${due.length})</h2><p class="note" style="margin-bottom:8px;">Paid orders that were cancelled. Send the amount back to the customer's MoMo, then record it here.</p>${table(due)}
+    <h2 style="margin-top:20px;">Refunded in the last 30 days</h2>${table(done)}`;
+}
+async function markRefunded(id, code, amount) {
+  const ref = prompt(`You sent ${amount} back to the customer for ${code}? Enter the MoMo transaction ID:`, '');
+  if (ref === null) return;
+  const { error } = await sb.rpc('ops_mark_refunded', { p_order: id, p_ref: ref }); if (error) fail(error); refunds();
+}
+
+// ---------- menus: the team keeps every business's dishes and products up to date ----------
+let MENU_ORG = null;
+async function menus() {
+  const [{ data: orgs }, { data: cats }] = await Promise.all([
+    sb.from('organizations').select('id,business_name,vertical').order('business_name'),
+    sb.from('market_categories').select('id,name,vertical,parent_id').eq('active', true).order('sort').order('name')]);
+  if (!MENU_ORG && orgs?.length) MENU_ORG = (orgs.find(o => o.vertical === 'food') || orgs[0]).id;
+  const org = (orgs || []).find(o => o.id === MENU_ORG);
+  const { data: items, error } = await sb.from('products').select('id,name,price,category,photo_url,stock,made_to_order,list_on_market,show_online,market_category_id,description').eq('org_id', MENU_ORG).order('category').order('name');
+  if (error) return M().innerHTML = `<div class="err">${E(error.message)}</div>`;
+  const catOpts = sel => (cats || []).filter(c => c.vertical === (org?.vertical || 'shop')).map(c => `<option value="${c.id}" ${c.id === sel ? 'selected' : ''}>${E(c.name)}</option>`).join('');
+  window.MENU_ITEMS = items || [];
+  M().innerHTML = `<h2>Menus and products</h2>
+    <div class="row" style="margin-bottom:10px;"><label class="fg">Business<select id="mn-org">${(orgs || []).map(o => `<option value="${o.id}" ${o.id === MENU_ORG ? 'selected' : ''}>${E(o.business_name)}</option>`).join('')}</select></label>
+      <p class="note" style="flex:1;min-width:240px;">Prices are the business's own prices. Untick <b>Available</b> when a dish runs out; untick <b>Listed</b> to hide it. Changes show on the sites straight away.</p></div>
+    <div class="box"><b>Add ${org?.vertical === 'food' ? 'a dish' : 'a product'}</b><div class="row" style="margin-top:8px;">
+      <label class="fg">Name<input id="mn-name"></label><label class="fg">Menu section<input id="mn-sec" placeholder="e.g. Rice dishes"></label>
+      <label class="fg">Price (GH₵)<input id="mn-price" type="number" min="0" step="0.5"></label>
+      <label class="fg">Category on the site<select id="mn-cat">${catOpts(null)}</select></label>
+      <label class="fg">Photo (optional)<input id="mn-photo" type="file" accept="image/*"></label>
+      <button class="btn gold" id="mn-add">Add</button></div></div>
+    ${(items || []).length ? `<table><tr><th>Photo</th><th>Name</th><th>Section</th><th>Price</th><th>Category on the site</th><th>Available</th><th>Listed</th><th></th></tr>${items.map((p, i) => `<tr>
+      <td><label style="cursor:pointer;">${p.photo_url ? `<img src="${E(p.photo_url)}" style="width:52px;height:52px;object-fit:cover;border-radius:8px;">` : '<span class="note">Add photo</span>'}
+        <input type="file" accept="image/*" style="display:none;" onchange="menuPhoto(${i},this.files[0])"></label></td>
+      <td><input id="mn-n-${i}" value="${E(p.name)}" style="min-width:180px;"></td><td><input id="mn-s-${i}" value="${E(p.category || '')}" style="width:120px;"></td>
+      <td><input id="mn-p-${i}" type="number" min="0" step="0.5" value="${p.price}" style="width:80px;"></td>
+      <td><select id="mn-c-${i}"><option value="">—</option>${catOpts(p.market_category_id)}</select></td>
+      <td>${p.made_to_order ? `<input type="checkbox" id="mn-a-${i}" ${p.stock > 0 ? 'checked' : ''}>` : `<input id="mn-q-${i}" type="number" min="0" value="${p.stock}" style="width:70px;" title="In stock">`}</td>
+      <td><input type="checkbox" id="mn-l-${i}" ${p.list_on_market && p.show_online ? 'checked' : ''}></td>
+      <td><button class="btn" onclick="menuSave(${i})">Save</button></td></tr>`).join('')}</table>` : '<div class="empty">Nothing on this menu yet.</div>'}`;
+  document.getElementById('mn-org').onchange = e => { MENU_ORG = e.target.value; menus(); };
+  document.getElementById('mn-add').onclick = async () => {
+    const v = id => document.getElementById(id).value.trim(), price = Number(v('mn-price'));
+    if (v('mn-name').length < 2) return alert('Enter a name.');
+    if (!(price > 0)) return alert('Enter the price.');
+    const file = document.getElementById('mn-photo').files[0], food = org?.vertical === 'food';
+    let photo = null;
+    if (file) { photo = await uploadPhoto(MENU_ORG, file); if (!photo) return; }
+    const { error } = await sb.from('products').insert({ org_id: MENU_ORG, barcode: 'OPS-' + Date.now().toString(36).toUpperCase(), name: v('mn-name'),
+      category: v('mn-sec') || null, price, stock: food ? 100000 : 0, made_to_order: food, photo_url: photo,
+      market_category_id: v('mn-cat') || null, list_on_market: true, show_online: true, delivery_size: 'motorbike' });
+    if (error) fail(error); menus();
+  };
+}
+async function menuSave(i) {
+  const p = window.MENU_ITEMS[i], v = id => document.getElementById(id);
+  const patch = { name: v('mn-n-' + i).value.trim(), category: v('mn-s-' + i).value.trim() || null, price: Number(v('mn-p-' + i).value),
+    market_category_id: v('mn-c-' + i).value || null, list_on_market: v('mn-l-' + i).checked, show_online: v('mn-l-' + i).checked };
+  if (p.made_to_order) patch.stock = v('mn-a-' + i).checked ? 100000 : 0; else patch.stock = Math.max(0, parseInt(v('mn-q-' + i).value || '0', 10));
+  if (patch.name.length < 2 || !(patch.price > 0)) return alert('Check the name and price.');
+  const { error } = await sb.from('products').update(patch).eq('id', p.id); if (error) fail(error); menus();
+}
+async function menuPhoto(i, file) {
+  if (!file) return;
+  const url = await uploadPhoto(MENU_ORG, file); if (!url) return;
+  const { error } = await sb.from('products').update({ photo_url: url }).eq('id', window.MENU_ITEMS[i].id); if (error) fail(error); menus();
+}
+// Photos are shrunk to at most 900 px before upload, then stored in the product-photos bucket under the business.
+async function uploadPhoto(org, file) {
+  try {
+    const img = await createImageBitmap(file), k = Math.min(1, 900 / Math.max(img.width, img.height));
+    const c = Object.assign(document.createElement('canvas'), { width: Math.round(img.width * k), height: Math.round(img.height * k) });
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', .82));
+    const path = `${org}/ops-${Date.now()}.jpg`;
+    const { error } = await sb.storage.from('product-photos').upload(path, blob, { contentType: 'image/jpeg' });
+    if (error) { fail(error); return null; }
+    return sb.storage.from('product-photos').getPublicUrl(path).data.publicUrl;
+  } catch (e) { fail(e); return null; }
 }
 
 // ---------- payouts: shops are paid their own prices by close of business ----------
@@ -257,16 +375,25 @@ async function shops() {
   const { data, error } = await sb.from('organizations').select('id,business_name,vertical,contact_email,is_active,shop_online_settings(*)').order('business_name');
   if (error) return M().innerHTML = `<div class="err">${E(error.message)}</div>`;
   const st = s => s ? (Array.isArray(s) ? s[0] : s) : null;
-  M().innerHTML = `<h2>Shops & restaurants</h2><p class="note" style="margin-bottom:8px;">Online shops and menus are free and switched on for everyone. List a business here once its products or menu are ready; customers then see them with the markup added.</p>
-    <table><tr><th>Business</th><th>Type</th><th>Phone</th><th>Own page</th><th>Listed on nyansatek.store / .food</th></tr>${(data || []).map(o => {
+  M().innerHTML = `<h2>Shops & restaurants</h2><p class="note" style="margin-bottom:8px;">Online shops and menus are free and switched on for everyone. List a business here once its products or menu are ready; customers then see them with the markup added.
+    Opening hours: leave both times empty to take orders all day. Outside the hours, on closed days or while "Closed for now" is ticked, customers cannot order from that business.</p>
+    <table><tr><th>Business</th><th>Type</th><th>Phone</th><th>Own page</th><th>Listed on nyansatek.store / .food</th><th>Opening hours</th></tr>${(data || []).map(o => {
     const s = st(o.shop_online_settings) || {}, food = o.vertical === 'food';
     const page = s.store_slug ? (food ? `https://nyansatek.rest/menu/?s=${E(s.store_slug)}` : `https://nyansatek.shop/shop/?s=${E(s.store_slug)}`) : '';
     return `<tr><td><b>${E(o.business_name)}</b><div class="note">${E(o.contact_email || 'no software login')}</div></td>
       <td>${food ? 'Restaurant' : 'Shop'}</td><td>${tel(s.shop_phone || s.whatsapp_number)}</td>
       <td>${page ? `<a href="${page}" target="_blank" rel="noopener">${E(s.store_slug)}</a>` : '<span class="note">no web address</span>'}</td>
       <td><span class="pill ${s.marketplace_status === 'approved' ? 'ok' : s.marketplace_status === 'pending' ? 'warn' : s.marketplace_status === 'suspended' ? 'bad' : ''}">${s.marketplace_status === 'approved' ? 'listed' : s.marketplace_status === 'pending' ? 'waiting' : s.marketplace_status === 'suspended' ? 'hidden' : 'not listed'}</span>
-        <div style="margin-top:4px;">${s.marketplace_status !== 'approved' ? `<button class="btn" onclick="setMarket('${o.id}','approved')">List</button>` : `<button class="btn bad" onclick="setMarket('${o.id}','suspended')">Hide</button>`}</div></td></tr>`;
+        <div style="margin-top:4px;">${s.marketplace_status !== 'approved' ? `<button class="btn" onclick="setMarket('${o.id}','approved')">List</button>` : `<button class="btn bad" onclick="setMarket('${o.id}','suspended')">Hide</button>`}</div></td>
+      <td style="white-space:nowrap;"><input type="time" id="h-o-${o.id}" value="${E((s.opens_at || '').slice(0, 5))}"> to <input type="time" id="h-c-${o.id}" value="${E((s.closes_at || '').slice(0, 5))}">
+        <div class="note" style="margin-top:4px;">Closed on: ${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d, i) => `<label><input type="checkbox" class="h-d-${o.id}" value="${i + 1}" ${(s.closed_days || []).includes(i + 1) ? 'checked' : ''}>${d}</label>`).join(' ')}</div>
+        <div style="margin-top:4px;"><label><input type="checkbox" id="h-p-${o.id}" ${s.paused ? 'checked' : ''}> Closed for now</label> <button class="btn" onclick="saveHours('${o.id}')">Save</button></div></td></tr>`;
   }).join('')}</table>`;
+}
+async function saveHours(org) {
+  const v = id => document.getElementById(id).value || null;
+  upsertSettings(org, { opens_at: v('h-o-' + org), closes_at: v('h-c-' + org), paused: document.getElementById('h-p-' + org).checked,
+    closed_days: [...document.querySelectorAll('.h-d-' + org + ':checked')].map(x => Number(x.value)) });
 }
 async function upsertSettings(org, patch) {
   const { error } = await sb.from('shop_online_settings').upsert(Object.assign({ org_id: org, addon_active: true }, patch), { onConflict: 'org_id' });
@@ -388,7 +515,7 @@ async function zones() {
   const [{ data: zs, error }, { data: fs }] = await Promise.all([sb.from('delivery_zones').select('*').order('sort').order('name'), sb.from('delivery_zone_fees').select('*')]);
   if (error) return M().innerHTML = `<div class="err">${E(error.message)}</div>`;
   const fee = (z, v) => (fs || []).find(f => f.zone_id === z && f.vehicle === v)?.fee ?? '';
-  M().innerHTML = `<h2>Delivery areas and fees</h2><p class="note" style="margin-bottom:8px;">Fee the customer pays for delivery in each area, by vehicle. The rider keeps it. Leave a fee empty if that vehicle doesn't deliver there.</p>
+  M().innerHTML = `<h2>Delivery areas and fees</h2><p class="note" style="margin-bottom:8px;">Typical rider fee in each area. Customers see the motorbike fee at checkout as "about GH₵…, paid to the rider". We don't collect it: the courier charges the customer and keeps it.</p>
     <div class="box"><div class="row"><label class="fg">New area<input id="z-name" placeholder="e.g. Adum / Kejetia"></label><button class="btn gold" id="z-add">Add area</button></div></div>
     <table><tr><th>Area</th>${VEH.map(v => `<th>${v} (GH₵)</th>`).join('')}<th>Active</th></tr>${(zs || []).map(z => `<tr><td>${E(z.name)}</td>${VEH.map(v => `<td><input type="number" min="0" step="0.5" style="width:90px" value="${fee(z.id, v)}" onchange="setFee('${z.id}','${v}',this.value)"></td>`).join('')}
       <td><input type="checkbox" ${z.active ? 'checked' : ''} onchange="sb.from('delivery_zones').update({active:this.checked}).eq('id','${z.id}').then(r=>r.error&&fail(r.error))"></td></tr>`).join('')}</table>`;
@@ -448,8 +575,10 @@ async function billing() {
   const c = cfg || {};
   M().innerHTML = `<h2>Settings</h2>
     <div class="box"><b>Payments and pricing</b><div class="row" style="margin-top:8px;">
-      <label class="fg">NYANSATEK MoMo number (customers pay here)<input id="b-momo" type="tel" value="${c.nyansatek_momo_number ? local(c.nyansatek_momo_number) : ''}"></label>
+      <label class="fg">NYANSATEK MoMo number<input id="b-momo" type="tel" value="${c.nyansatek_momo_number ? local(c.nyansatek_momo_number) : ''}"></label>
       <label class="fg">MoMo account name<input id="b-momoname" value="${E(c.nyansatek_momo_name || '')}"></label>
+      <label class="fg">MoMoPay merchant ID (shown to customers)<input id="b-merchant" value="${E(c.nyansatek_momo_merchant_id || '')}"></label>
+      <label class="fg">Team phone for new-order SMS (optional)<input id="b-alert" type="tel" value="${c.team_alert_phone ? local(c.team_alert_phone) : ''}"></label>
       <label class="fg">Food markup per dish (GH₵)<input id="b-food" type="number" min="0" step="0.5" value="${c.food_markup_per_item ?? 5}"></label>
       <label class="fg">Store markup (%)<input id="b-store" type="number" min="0" max="50" step="0.5" value="${Number(c.store_markup_rate ?? 0.05) * 100}"></label>
       <label class="fg">Minutes to pay before an order is cancelled<input id="b-mins" type="number" min="5" max="240" value="${c.accept_minutes ?? 30}"></label>
@@ -459,7 +588,10 @@ async function billing() {
     const v = id => document.getElementById(id).value.trim();
     const d = String(v('b-momo')).replace(/\D/g, ''), momo = /^0\d{9}$/.test(d) ? '233' + d.slice(1) : /^233\d{9}$/.test(d) ? d : null;
     if (!momo) return alert('Enter a valid MoMo number.');
+    const ad = v('b-alert').replace(/\D/g, ''), alertPhone = !ad ? null : /^0\d{9}$/.test(ad) ? '233' + ad.slice(1) : /^233\d{9}$/.test(ad) ? ad : undefined;
+    if (alertPhone === undefined) return alert('Enter a valid team phone number, or leave it empty.');
     const { error } = await sb.from('market_settings').update({ nyansatek_momo_number: momo, nyansatek_momo_name: v('b-momoname') || null,
+      nyansatek_momo_merchant_id: v('b-merchant') || null, team_alert_phone: alertPhone,
       food_markup_per_item: Number(v('b-food') || 0), store_markup_rate: Number(v('b-store') || 0) / 100, accept_minutes: Number(v('b-mins') || 30),
       updated_at: new Date().toISOString() }).eq('id', true);
     if (error) fail(error); else alert('Saved.'); billing();

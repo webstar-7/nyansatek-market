@@ -165,14 +165,16 @@ const errMsg = e => (e && (e.message || e.error_description)) || 'Something went
 const app = document.getElementById('app');
 
 // reference data, loaded once
-const REF = { cats: [], zones: [], fees: [], points: [], ready: null };
+const REF = { cats: [], zones: [], fees: [], points: [], open: {}, ready: null };
 REF.ready = (async () => {
-  const [c, z, f, p] = await Promise.all([
+  const [c, z, f, p, o] = await Promise.all([
     sb.from('market_categories').select('id,name,slug,parent_id,sort').eq('active', true).eq('vertical', 'shop').order('sort').order('name'),
     sb.from('delivery_zones').select('id,name').eq('active', true).order('sort').order('name'),
     sb.from('delivery_zone_fees').select('zone_id,vehicle,fee'),
-    sb.from('pickup_points').select('id,name,address,landmark,hours').eq('active', true).order('name')]);
+    sb.from('pickup_points').select('id,name,address,landmark,hours').eq('active', true).order('name'),
+    sb.rpc('shops_open_now')]);
   REF.cats = c.data || []; REF.zones = z.data || []; REF.fees = f.data || []; REF.points = p.data || [];
+  (o.data || []).forEach(x => { REF.open[x.org_id] = x; });
   const tops = REF.cats.filter(x => !x.parent_id);
   document.getElementById('nav').innerHTML = tops.map(t => `<a href="#/c/${E(t.slug)}" data-link data-slug="${E(t.slug)}">${E(t.name)}</a>`).join('');
 })();
@@ -303,10 +305,13 @@ async function listings(args) {
   if (error) throw error;
   return data || [];
 }
+// Opening hours: a closed shop's items stay visible but cannot be ordered until it opens.
+const isClosed = org => REF.open[org] && REF.open[org].is_open === false;
+const closedText = org => 'Closed now' + (REF.open[org]?.opens_at ? ' · opens ' + REF.open[org].opens_at : '');
 function cardHtml(p) {
   return `<a class="card" href="#/p/${p.org_id}/${p.id}" data-link>${PIMG(p)}
     <div class="body"><div class="name">${E(p.name)}</div><div class="shop">${E(p.shop_name)}</div>
-    <div class="price">${GH(p.price)}</div>${p.in_stock ? '' : '<div class="oos">Sold out</div>'}</div></a>`;
+    <div class="price">${GH(p.price)}</div>${!p.in_stock ? '<div class="oos">Sold out</div>' : isClosed(p.org_id) ? `<div class="oos">${E(closedText(p.org_id))}</div>` : ''}</div></a>`;
 }
 async function gridPage(title, intro, args) {
   app.innerHTML = `${intro || ''}<h1>${E(title)}</h1><div class="grid" id="grid"><div class="empty" style="grid-column:1/-1">Loading…</div></div><div class="more" id="more"></div>`;
@@ -394,6 +399,7 @@ async function product(orgId, id) {
       ${p.description ? `<p style="margin:12px 0;line-height:1.5;">${E(p.description)}</p>` : ''}
       <div style="margin:16px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
       ${!p.in_stock ? '<span class="status bad">Sold out</span>'
+        : isClosed(p.org_id) ? `<span class="status bad">${E(closedText(p.org_id))}</span>`
         : inCart ? `<div class="qty"><button id="m">−</button><span>${inCart}</span><button id="pl">+</button></div><a class="btn gold" href="#/cart" data-link>Go to cart</a>`
         : '<button class="btn gold" id="add">Add to cart</button>'}</div>
       <p class="note">Pay by MoMo when you order. The rider's delivery fee is paid to the rider when it arrives.</p></div></div>`;
@@ -409,14 +415,15 @@ function cartPage() {
   document.title = 'Cart · nyansatek.store';
   const shops = Object.entries(CART);
   if (!shops.length) { app.innerHTML = '<h1>Your cart</h1><div class="empty">Your cart is empty. <a href="#/" data-link>Start shopping</a></div>'; return; }
-  const all = cartItems().reduce((a, i) => a + i.qty * Number(i.p.price), 0);
+  const all = cartItems().reduce((a, i) => a + i.qty * Number(i.p.price), 0), closed = shops.filter(([org]) => isClosed(org));
   app.innerHTML = `<h1>Your cart</h1><p class="note">Everything in your cart is paid in one checkout.</p>` + shops.map(([org, c]) => {
     const items = Object.values(c.items);
-    return `<div class="box"><b>${E(c.shop.name)}</b>
+    return `<div class="box"><b>${E(c.shop.name)}</b>${isClosed(org) ? ` <span class="status bad">${E(closedText(org))}</span>` : ''}
       ${items.map(i => `<div class="line">${PIMG(i.p, '')}<div class="n">${E(i.p.name)}<div class="note">${GH(i.p.price)} each</div></div>
         <div class="qty"><button data-org="${org}" data-id="${i.p.id}" data-d="-1">−</button><span>${i.qty}</span><button data-org="${org}" data-id="${i.p.id}" data-d="1">+</button></div></div>`).join('')}</div>`;
   }).join('') + `<div class="box"><div class="sum" style="margin-top:0;"><div class="tot" style="border:0;margin:0;padding:0;"><span>Total</span><span>${GH(all)}</span></div></div>
-      <a class="btn gold" style="width:100%;" href="#/checkout" data-link>Checkout</a></div>`;
+      ${closed.length ? `<p class="err" style="margin:6px 0;">${E(closed.map(([, c]) => c.shop.name).join(', '))} ${closed.length === 1 ? 'is' : 'are'} closed right now. Remove ${closed.length === 1 ? 'its' : 'their'} items to check out.</p>`
+        : '<a class="btn gold" style="width:100%;" href="#/checkout" data-link>Checkout</a>'}</div>`;
   app.querySelectorAll('.qty button').forEach(btn => btn.onclick = () => { addToCart(CART[btn.dataset.org].items[btn.dataset.id].p, Number(btn.dataset.d)); cartPage(); });
 }
 
@@ -425,7 +432,7 @@ const isAlcohol = p => { const c = REF.cats.find(x => x.id === p.category_id); i
   const top = c.parent_id ? REF.cats.find(x => x.id === c.parent_id) : c; return (top || c).slug === 'beer-wine-spirits' || c.slug === 'beer-wine-spirits'; };
 function checkout() {
   const shops = Object.entries(CART);
-  if (!shops.length) { go('/cart'); return; }
+  if (!shops.length || shops.some(([org]) => isClosed(org))) { go('/cart'); return; }
   const items = cartItems();
   const goods = items.reduce((a, i) => a + i.qty * Number(i.p.price), 0);
   const alc = items.some(i => isAlcohol(i.p));
@@ -451,14 +458,16 @@ function checkout() {
     ${alc ? `<label class="age"><input type="checkbox" id="c-age"> <span><b>I am 18 or older.</b> This order has alcohol. I'll show ID to the rider if asked.</span></label>` : ''}
     <div class="sum" id="c-sum"></div><div class="err" id="c-err"></div>
     <button class="btn gold" style="width:100%;" id="c-go">Place order</button>
-    <p class="note" style="margin-top:8px;">Next you will see the MoMo number to pay. You'll get a tracking link and SMS updates.</p></div>`;
+    <p class="note" style="margin-top:8px;">Next you will see the MoMoPay merchant ID to pay. You'll get a tracking link and SMS updates.</p></div>`;
   const ful = () => document.querySelector('input[name=ful]:checked').value;
   const upd = () => {
     document.getElementById('ful-delivery').style.display = ful() === 'delivery' ? '' : 'none';
     document.getElementById('ful-pickup').style.display = ful() === 'pickup' ? '' : 'none';
-    document.getElementById('c-sum').innerHTML = `<div><span>Items</span><span>${GH(goods)}</span></div>${ful() === 'delivery' ? '<div><span>Delivery</span><span>Paid to the rider on arrival</span></div>' : ''}<div class="tot"><span>Pay by MoMo</span><span>${GH(goods)}</span></div>`;
+    const zone = document.getElementById('c-zone').value, fee = REF.fees.find(f => f.zone_id === zone && f.vehicle === 'motorbike');
+    const feeTxt = fee ? `About ${GH(fee.fee)}, paid to the rider` : 'Paid to the rider on arrival';
+    document.getElementById('c-sum').innerHTML = `<div><span>Items</span><span>${GH(goods)}</span></div>${ful() === 'delivery' ? `<div><span>Delivery</span><span>${feeTxt}</span></div>` : ''}<div class="tot"><span>Pay by MoMo</span><span>${GH(goods)}</span></div>`;
   };
-  app.querySelectorAll('input[name=ful]').forEach(r => r.onchange = upd); upd();
+  app.querySelectorAll('input[name=ful]').forEach(r => r.onchange = upd); document.getElementById('c-zone').onchange = upd; upd();
   document.getElementById('c-go').onclick = async () => {
     const err = document.getElementById('c-err'), btn = document.getElementById('c-go'), v = id => document.getElementById(id).value.trim();
     err.textContent = '';
@@ -512,8 +521,7 @@ async function tracking(token) {
       ${ended && o.cancel_reason ? `<p class="note" style="margin-top:8px;">${E(o.cancel_reason)}</p>` : ''}
       ${!ended ? `<ul class="steps">${steps.map(([k, t], i) => `<li class="${ORDER_OF(k) < done || (i === steps.length - 1 && done >= ORDER_OF(k)) ? 'done' : ORDER_OF(k) === done ? 'now' : ''}"><span class="dot"></span>${E(t)}</li>`).join('')}</ul>` : ''}</div>
     ${o.payment_method === 'momo' && !o.payment_confirmed && !ended ? `<div class="box"><b>Pay by MoMo</b>
-      <p class="note" style="margin:6px 0;">Send <b>${GH(o.total)}</b> by MoMo to:</p>
-      <div class="big">${E('0' + String(o.pay_to.momo_number || '').slice(3))}</div>${o.pay_to.momo_name ? `<div class="note">${E(o.pay_to.momo_name)}</div>` : ''}
+      ${payTo(o.pay_to, o.total)}
       <p class="note" style="margin-top:6px;">Use your order number <b>${E(o.code)}</b> as the reference, then enter the transaction ID below.</p>
       ${o.status === 'placed' ? `<div class="fg"><label>MoMo transaction ID</label><input id="t-ref" value="${E(o.momo_txn_id || '')}"></div>
       <button class="btn" id="t-send">Send transaction ID</button><div class="err" id="t-err"></div>` : ''}</div>` : ''}
@@ -538,6 +546,15 @@ async function tracking(token) {
   }, 20000);
 }
 
+// How to pay: MoMoPay to the NYANSATEK VENTURES merchant ID (or the number, if no merchant ID is set).
+function payTo(t, amount) {
+  if (t.merchant_id) return `<p class="note" style="margin:6px 0;">Pay <b>${GH(amount)}</b> with MoMoPay to merchant ID:</p>
+      <div class="big">${E(t.merchant_id)}</div>${t.momo_name ? `<div class="note">${E(t.momo_name)}</div>` : ''}
+      <p class="note" style="margin-top:6px;">On MTN MoMo: dial *170#, choose MoMoPay, then enter the merchant ID.</p>`;
+  return `<p class="note" style="margin:6px 0;">Send <b>${GH(amount)}</b> by MoMo to:</p>
+      <div class="big">${E('0' + String(t.momo_number || '').slice(3))}</div>${t.momo_name ? `<div class="note">${E(t.momo_name)}</div>` : ''}`;
+}
+
 // ---------- checkout tracking: one payment, one page, each shop's part shown separately ----------
 async function checkoutTracking(token) {
   const { data: k, error } = await sb.rpc('get_checkout', { p_token: token });
@@ -557,8 +574,7 @@ async function checkoutTracking(token) {
         : !allCancelled && !done ? '<p class="note" style="margin-top:8px;">Your order is being prepared. We will text you when it is on the way.</p>' : ''}
       ${allCancelled && first.cancel_reason ? `<p class="note" style="margin-top:8px;">${E(first.cancel_reason)}</p>` : ''}</div>
     ${unpaid ? `<div class="box"><b>Pay by MoMo</b>
-      <p class="note" style="margin:6px 0;">Send <b>${GH(total)}</b> by MoMo to:</p>
-      <div class="big">${E('0' + String(k.pay_to.momo_number || '').slice(3))}</div>${k.pay_to.momo_name ? `<div class="note">${E(k.pay_to.momo_name)}</div>` : ''}
+      ${payTo(k.pay_to, total)}
       <p class="note" style="margin-top:6px;">Use your order number <b>${E(k.code)}</b> as the reference, then enter the transaction ID below.</p>
       <div class="fg"><label>MoMo transaction ID</label><input id="t-ref" value="${E(k.momo_txn_id || '')}"></div>
       <button class="btn" id="t-send">Send transaction ID</button><div class="err" id="t-err"></div></div>` : ''}
