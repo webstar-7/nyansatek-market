@@ -603,6 +603,84 @@ updateCartBtn(); route();
 
 // Lets the marketplace be installed as an app and open when the connection is poor.
 if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+
+</script>
+<script>
+// ---------- "Get the app" wall for visitors who scan the printed QR code ----------
+// Arriving with ?src=qr marks this phone. From then on, every visit in the browser shows a full-screen screen with
+// no close button until the app is installed: Android/Chrome installs with one tap; on iPhone it shows
+// Share > Add to Home Screen; inside a QR-scanner or social-app browser (where installing is impossible) it asks to
+// open the page in Chrome or Safari. Opening the installed app (standalone) never shows it.
+(() => {
+  const E = s => s == null ? '' : String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  const fromQr = new URLSearchParams(location.search).get('src') === 'qr';
+  const get = () => { try { return localStorage.getItem('nt-install'); } catch (e) { return null; } };
+  const set = v => { try { localStorage.setItem('nt-install', v); } catch (e) {} };
+  if (standalone) { set('done'); return; }
+  if (fromQr && get() !== 'done') set('due');
+  if (get() !== 'due' && !fromQr) return;
+  if (get() === 'done') return;
+
+  const ua = navigator.userAgent;
+  const ios = /iPhone|iPad|iPod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const android = /Android/i.test(ua);
+  const inApp = /FBAN|FBAV|FB_IAB|Instagram|Line\/|MicroMessenger|Snapchat|TikTok|Twitter|; wv\)|GSA\//i.test(ua) || (ios && !/Safari\//i.test(ua));
+  const name = document.querySelector('meta[name=apple-mobile-web-app-title]')?.content || document.title;
+  const link = location.origin + location.pathname + '?src=qr';
+  let deferred = null;
+
+  const css = document.createElement('style');
+  css.textContent = `#nt-wall{position:fixed;inset:0;z-index:2147483647;background:var(--p);color:#fff;display:flex;align-items:center;justify-content:center;padding:24px;overflow:auto;}
+    #nt-wall .in{max-width:420px;width:100%;text-align:center;}
+    #nt-wall img{width:96px;height:96px;border-radius:22px;box-shadow:0 8px 30px rgba(0,0,0,.3);}
+    #nt-wall h2{font-size:1.6rem;margin:18px 0 8px;line-height:1.2;}
+    #nt-wall p{opacity:.92;line-height:1.5;margin:8px 0;}
+    #nt-wall ul{text-align:left;margin:16px auto;max-width:320px;line-height:1.7;padding-left:20px;}
+    #nt-wall .go{display:block;width:100%;margin-top:18px;padding:16px;border:0;border-radius:14px;background:#fff;color:var(--p);font-weight:800;font-size:1.1rem;cursor:pointer;}
+    #nt-wall .sm{display:inline-block;margin-top:14px;padding:10px 14px;border:1px solid rgba(255,255,255,.6);border-radius:10px;background:transparent;color:#fff;font-weight:600;cursor:pointer;}
+    #nt-wall ol{text-align:left;margin:16px auto;max-width:330px;line-height:1.8;padding-left:22px;background:rgba(255,255,255,.12);border-radius:14px;padding:14px 14px 14px 36px;}
+    #nt-wall b.k{background:#fff;color:var(--p);border-radius:6px;padding:1px 7px;white-space:nowrap;}
+    #nt-wall a.go{text-decoration:none;}`;
+  document.head.appendChild(css);
+  const wall = document.createElement('div');
+  wall.id = 'nt-wall'; wall.setAttribute('role', 'dialog'); wall.setAttribute('aria-modal', 'true'); wall.setAttribute('aria-label', 'Get the ' + name + ' app');
+  document.body.appendChild(wall);
+  document.documentElement.style.overflow = 'hidden'; document.body.style.overflow = 'hidden';
+  // Put the wall back if anything removes it.
+  new MutationObserver(() => { if (!document.getElementById('nt-wall') && get() === 'due') document.body.appendChild(wall); }).observe(document.body, { childList: true });
+
+  const head = `<img src="icon-192.png" alt=""><h2>Get the ${E(name)} app</h2>`;
+  const perks = `<ul><li>Order in a few taps, straight from your home screen</li><li>Track every order live</li><li>Hear first about new ${/food/i.test(name) ? 'restaurants and dishes' : 'shops and deals'}</li></ul>`;
+  const done = () => { set('done'); document.documentElement.style.overflow = ''; document.body.style.overflow = ''; wall.remove(); };
+  function render() {
+    if (inApp) {
+      wall.innerHTML = `<div class="in">${head}<p>This page is open inside another app, which can't install ${E(name)}.</p>
+        <ol><li>${android ? 'Tap <b class="k">Open in Chrome</b> below' : 'Tap the <b class="k">⋯</b> menu at the top or bottom'}</li><li>${android ? 'Then tap <b class="k">Install</b>' : 'Choose <b class="k">Open in Safari</b>, then follow the steps there'}</li></ol>
+        ${android ? `<a class="go" href="intent://${location.host}${location.pathname}?src=qr#Intent;scheme=https;package=com.android.chrome;end">Open in Chrome</a>` : ''}
+        <button class="sm" id="nt-copy">Copy the link</button></div>`;
+      document.getElementById('nt-copy').onclick = e => { navigator.clipboard?.writeText(link).then(() => e.target.textContent = 'Link copied. Paste it in ' + (android ? 'Chrome' : 'Safari')); };
+    } else if (ios) {
+      wall.innerHTML = `<div class="in">${head}${perks}
+        <ol><li>Tap the <b class="k">Share</b> button <span aria-hidden="true">(the square with an arrow)</span></li><li>Scroll and tap <b class="k">Add to Home Screen</b></li><li>Tap <b class="k">Add</b>, then open ${E(name)} from your home screen</li></ol>
+        <button class="sm" id="nt-ios">I've added it</button></div>`;
+      document.getElementById('nt-ios').onclick = done;
+    } else if (deferred) {
+      wall.innerHTML = `<div class="in">${head}${perks}<button class="go" id="nt-install">Install the app</button><p style="font-size:.85rem;">Free. Takes a few seconds and uses almost no space.</p></div>`;
+      document.getElementById('nt-install').onclick = async () => { deferred.prompt(); const c = await deferred.userChoice.catch(() => null); deferred = null; if (!c || c.outcome !== 'accepted') render(); };
+    } else {
+      wall.innerHTML = `<div class="in">${head}${perks}
+        <ol><li>Tap the browser menu <b class="k">⋮</b></li><li>Tap <b class="k">Install app</b> or <b class="k">Add to Home screen</b></li><li>Open ${E(name)} from your home screen</li></ol>
+</div>`;
+    }
+  }
+  window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferred = e; render(); });
+  window.addEventListener('appinstalled', () => {
+    set('done');
+    wall.innerHTML = `<div class="in">${head}<p>Installed. Open <b>${E(name)}</b> from your home screen to order.</p></div>`;
+  });
+  render();
+})();
 </script>
 </body>
 </html>
