@@ -626,8 +626,14 @@ if ('serviceWorker' in navigator) window.addEventListener('load', () => navigato
   const ios = /iPhone|iPad|iPod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   const android = /Android/i.test(ua);
   const inApp = /FBAN|FBAV|FB_IAB|Instagram|Line\/|MicroMessenger|Snapchat|TikTok|Twitter|; wv\)|GSA\//i.test(ua) || (ios && !/Safari\//i.test(ua));
+  // On Android only Chrome installs safely: Samsung Internet and other browsers build their own app package, which
+  // Google Play Protect blocks as "Unsafe app" ("built for an older version of Android"). Send those to Chrome.
+  const noChrome = new URLSearchParams(location.search).get('nochrome') === '1';
+  const chrome = /Chrome\/\d/.test(ua) && !/SamsungBrowser|OPR\/|OPX|EdgA|YaBrowser|UCBrowser|MiuiBrowser|HuaweiBrowser|HeyTapBrowser|VivoBrowser|Firefox|DuckDuckGo|PHX\//i.test(ua);
+  const otherBrowser = android && !inApp && !chrome;
   const name = document.querySelector('meta[name=apple-mobile-web-app-title]')?.content || document.title;
   const link = location.origin + location.pathname + '?src=qr';
+  const toChrome = `intent://${location.host}${location.pathname}?src=qr#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=${encodeURIComponent(link + '&nochrome=1')};end`;
   let deferred = null;
 
   const css = document.createElement('style');
@@ -657,9 +663,19 @@ if ('serviceWorker' in navigator) window.addEventListener('load', () => navigato
     if (inApp) {
       wall.innerHTML = `<div class="in">${head}<p>This page is open inside another app, which can't install ${E(name)}.</p>
         <ol><li>${android ? 'Tap <b class="k">Open in Chrome</b> below' : 'Tap the <b class="k">⋯</b> menu at the top or bottom'}</li><li>${android ? 'Then tap <b class="k">Install</b>' : 'Choose <b class="k">Open in Safari</b>, then follow the steps there'}</li></ol>
-        ${android ? `<a class="go" href="intent://${location.host}${location.pathname}?src=qr#Intent;scheme=https;package=com.android.chrome;end">Open in Chrome</a>` : ''}
+        ${android ? `<a class="go" href="${toChrome}">Open in Chrome</a>` : ''}
         <button class="sm" id="nt-copy">Copy the link</button></div>`;
       document.getElementById('nt-copy').onclick = e => { navigator.clipboard?.writeText(link).then(() => e.target.textContent = 'Link copied. Paste it in ' + (android ? 'Chrome' : 'Safari')); };
+    } else if (otherBrowser && noChrome) {
+      // Chrome is not on this phone: don't offer this browser's install (it is the one Play Protect blocks).
+      wall.innerHTML = `<div class="in">${head}<p>To install ${E(name)}, you need the Chrome browser. Get Chrome from the Play Store, then scan the QR code again.</p>
+        <a class="go" href="https://play.google.com/store/apps/details?id=com.android.chrome">Get Chrome</a>
+        <button class="sm" id="nt-skip">Continue in this browser</button></div>`;
+      document.getElementById('nt-skip').onclick = done;
+    } else if (otherBrowser) {
+      wall.innerHTML = `<div class="in">${head}${perks}<p>${E(name)} installs from Chrome.</p>
+        <a class="go" href="${toChrome}">Open in Chrome</a>
+        <ol><li>Tap <b class="k">Open in Chrome</b></li><li>Then tap <b class="k">Install the app</b></li></ol></div>`;
     } else if (ios) {
       wall.innerHTML = `<div class="in">${head}${perks}
         <ol><li>Tap the <b class="k">Share</b> button <span aria-hidden="true">(the square with an arrow)</span></li><li>Scroll and tap <b class="k">Add to Home Screen</b></li><li>Tap <b class="k">Add</b>, then open ${E(name)} from your home screen</li></ol>
@@ -674,7 +690,7 @@ if ('serviceWorker' in navigator) window.addEventListener('load', () => navigato
 </div>`;
     }
   }
-  window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferred = e; render(); });
+  window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); if (otherBrowser) return; deferred = e; render(); });
   window.addEventListener('appinstalled', () => {
     set('done');
     wall.innerHTML = `<div class="in">${head}<p>Installed. Open <b>${E(name)}</b> from your home screen to order.</p></div>`;
