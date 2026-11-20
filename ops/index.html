@@ -49,7 +49,7 @@ const local = p => p ? '0' + String(p).slice(3) : '';
 const ago = t => { const m = Math.round((Date.now() - new Date(t)) / 60000); return m < 60 ? m + ' min' : Math.round(m / 60) + ' h'; };
 const VEH = ['motorbike', 'car', 'van', 'truck'], RANK = { motorbike: 1, car: 2, van: 3, truck: 4 };
 const app = document.getElementById('app');
-const TABS = [['orders', 'Orders'], ['desk', 'Pickup desk'], ['cash', 'Cash'], ['shops', 'Shops'], ['riders', 'Riders'], ['zones', 'Zones & fees'], ['points', 'Pickup points'], ['cats', 'Categories'], ['billing', 'Billing'], ['team', 'Team']];
+const TABS = [['orders', 'Orders'], ['couriers', 'Couriers'], ['payouts', 'Payouts'], ['shops', 'Shops & restaurants'], ['desk', 'Pickup desk'], ['riders', 'Rider app'], ['zones', 'Zones'], ['points', 'Pickup points'], ['cats', 'Categories'], ['billing', 'Settings'], ['team', 'Team']];
 let TAB = location.hash.slice(1) || 'orders', timer = null, IS_MASTER = false;
 const fail = e => alert(e?.message || String(e));
 
@@ -102,47 +102,122 @@ function shell(email, name) {
 }
 function show() {
   clearInterval(timer);
-  const fn = { orders, desk, cash, shops, riders, zones, points, cats, billing, team: IS_MASTER ? team : orders }[TAB] || orders;
-  fn(); if (TAB === 'orders' || TAB === 'cash') timer = setInterval(fn, 20000);
+  const fn = { orders, couriers, payouts, desk, cash, shops, riders, zones, points, cats, billing, team: IS_MASTER ? team : orders }[TAB] || orders;
+  fn(); if (TAB === 'orders') timer = setInterval(() => { if (!document.querySelector('#main select:focus')) fn(); }, 20000);
 }
 const M = () => document.getElementById('main');
 
 // ---------- orders board ----------
-let RIDERS = [];
+// Every order is paid by MoMo to NYANSATEK. The team: 1) checks the MoMo and marks it paid, 2) calls the shop or
+// restaurant and marks it confirmed, 3) picks a courier and calls them, 4) marks it on the way, then delivered.
+// No SMS goes to a shop or courier on its own: the SMS buttons send one when it is worth the credit.
+let COURIERS = [];
+const tel = p => p ? `<a href="tel:${local(p)}">${local(p)}</a>` : '';
 async function orders() {
   const since = new Date(Date.now() - 864e5).toISOString();
-  const [{ data, error }, { data: rd }] = await Promise.all([
-    sb.from('online_orders').select('*,organizations(business_name),pickup_points(name),delivery_zones(name),delivery_jobs(id,kind,status,vehicle,rider_id,riders(full_name,phone))')
-      .or(`status.in.(placed,accepted,ready,in_transit,at_pickup_point,returning,delivered,collected),created_at.gte.${since}`).order('created_at', { ascending: false }).limit(300),
-    sb.from('riders').select('id,full_name,vehicle,online,active,phone').eq('active', true).order('full_name')]);
+  const [{ data, error }, { data: cs }] = await Promise.all([
+    sb.from('online_orders').select('*,organizations(business_name,vertical,shop_online_settings(shop_phone,whatsapp_number,shop_address)),pickup_points(name),delivery_zones(name),couriers(name,phone,company),online_order_items(qty,name_snapshot)')
+      .or(`status.in.(placed,accepted,ready,in_transit,at_pickup_point,returning),created_at.gte.${since}`).order('created_at', { ascending: false }).limit(300),
+    sb.from('couriers').select('id,name,company,phone').eq('active', true).order('company').order('name')]);
   if (error) return M().innerHTML = `<div class="err">${E(error.message)}</div>`;
-  RIDERS = rd || [];
+  COURIERS = cs || [];
   const rows = data || [];
-  const live = rows.filter(o => !['completed', 'cancelled', 'returned'].includes(o.status) && !(['delivered', 'collected'].includes(o.status) && o.cash_status === 'none'));
+  const live = rows.filter(o => !['delivered', 'collected', 'completed', 'cancelled', 'returned'].includes(o.status));
   const finished = rows.filter(o => !live.includes(o));
-  const late = o => o.status === 'placed' && (new Date(o.accept_deadline) - Date.now()) < 4 * 60000;
-  const job = o => (o.delivery_jobs || []).find(j => j.status !== 'cancelled' && j.status !== 'done') || null;
+  const paid = o => !!o.payment_confirmed_at;
+  const minsLeft = o => Math.max(0, Math.ceil((new Date(o.accept_deadline) - Date.now()) / 60000));
+  const late = o => o.status === 'placed' && (paid(o) ? Date.now() - new Date(o.payment_confirmed_at) > 10 * 60000 : minsLeft(o) < 5);
+  const shopOf = o => { const s = o.organizations?.shop_online_settings; return (Array.isArray(s) ? s[0] : s) || {}; };
+  const step = o => o.status === 'placed' ? (paid(o) ? ['warn', 'paid · call the shop'] : ['warn', 'waiting for payment'])
+    : ({ accepted: ['', 'confirmed · send a courier'], ready: ['', 'ready · send a courier'], in_transit: ['', 'on the way'], at_pickup_point: ['', 'at pickup point'],
+         delivered: ['ok', 'delivered'], collected: ['ok', 'collected'], completed: ['ok', 'completed'], cancelled: ['bad', 'cancelled'], returning: ['bad', 'returning'], returned: ['bad', 'returned'] })[o.status] || ['', o.status];
+  const act = (o, a, label, cls = '') => `<button class="btn ${cls}" onclick="orderAction('${o.id}','${a}','${E(o.code)}')">${label}</button>`;
   const tr = o => {
-    const j = job(o), mins = Math.max(0, Math.ceil((new Date(o.accept_deadline) - Date.now()) / 60000));
-    const riderSel = j && ['open', 'assigned', 'at_shop'].includes(j.status) ? `<select onchange="assign('${j.id}',this.value)"><option value="">${j.rider_id ? 'Unassign' : 'Assign rider…'}</option>${RIDERS.filter(r => RANK[r.vehicle] >= RANK[j.vehicle]).map(r => `<option value="${r.id}" ${r.id === j.rider_id ? 'selected' : ''}>${E(r.full_name)} (${r.vehicle}${r.online ? ', online' : ''})</option>`).join('')}</select>` : '';
-    return `<tr class="${late(o) ? 'late' : ''}"><td><b>${E(o.code)}</b><div class="note">${ago(o.created_at)} ago · ${o.channel === 'market' ? 'market' : 'own shop'}</div></td>
-      <td>${E(o.organizations?.business_name)}</td>
-      <td>${E(o.customer_name)}<div class="note"><a href="tel:+${E(o.customer_phone)}">${local(o.customer_phone)}</a></div></td>
-      <td>${o.fulfilment === 'delivery' ? `Delivery · ${E(o.vehicle)}<div class="note">${E(o.delivery_zones?.name || '')}</div>` : `Pickup<div class="note">${E(o.pickup_points?.name || '')}</div>`}</td>
-      <td>${GH(Number(o.goods_total) + Number(o.delivery_fee))}<div class="note">${o.payment_method === 'momo' ? 'MoMo' + (o.payment_confirmed_at ? ' ✓' : '') : 'on delivery'}</div></td>
-      <td><span class="pill ${o.status === 'placed' ? 'warn' : ['cancelled', 'returning'].includes(o.status) ? 'bad' : ''}">${E(o.status)}</span>${o.status === 'placed' ? `<div class="note">${mins} min left</div>` : ''}${o.cash_status !== 'none' ? `<div class="note">cash: ${E(o.cash_status.replace(/_/g, ' '))}</div>` : ''}</td>
-      <td>${j ? `${E(j.kind.replace(/_/g, ' '))} · ${E(j.status)}<div class="note">${E(j.riders?.full_name || 'no rider yet')}</div>${riderSel}` : ''}</td>
-      <td>${!['completed', 'cancelled', 'returned', 'delivered', 'collected'].includes(o.status) ? `<button class="btn bad" onclick="cancelOrder('${o.id}','${E(o.code)}')">Cancel</button>` : ''}</td></tr>`;
+    const sh = shopOf(o), open = live.includes(o), [pc, pt] = step(o);
+    let actions = '';
+    if (o.status === 'placed' && !paid(o)) actions = act(o, 'paid', 'Payment received', 'gold');
+    else if (o.status === 'placed') actions = act(o, 'confirmed', 'Shop confirmed', 'gold') + ` <button class="btn sec" onclick="orderSms('${o.id}','shop')">SMS shop</button>`;
+    else if (['accepted', 'ready'].includes(o.status)) actions = (o.status === 'accepted' ? act(o, 'ready', 'Ready', 'sec') + ' ' : '') + act(o, 'on_the_way', o.fulfilment === 'pickup' ? 'At pickup point' : 'On the way', 'gold')
+      + ` <button class="btn sec" onclick="orderSms('${o.id}','shop')">SMS shop</button>` + (o.courier_id ? ` <button class="btn sec" onclick="orderSms('${o.id}','courier')">SMS courier</button>` : '');
+    else if (['in_transit', 'at_pickup_point'].includes(o.status)) actions = act(o, 'delivered', o.fulfilment === 'pickup' ? 'Collected' : 'Delivered', 'gold') + (o.courier_id ? ` <button class="btn sec" onclick="orderSms('${o.id}','courier')">SMS courier</button>` : '');
+    const courierSel = open && o.fulfilment === 'delivery' && o.status !== 'in_transit'
+      ? `<select onchange="setCourier('${o.id}',this.value)"><option value="">${o.courier_id ? 'Remove courier' : 'Choose courier…'}</option>${COURIERS.map(c => `<option value="${c.id}" ${c.id === o.courier_id ? 'selected' : ''}>${E(c.company && c.company !== c.name ? c.company + ' · ' + c.name : c.name)}</option>`).join('')}</select>` : '';
+    return `<tr class="${late(o) ? 'late' : ''}"><td><b>${E(o.code)}</b><div class="note">${ago(o.created_at)} ago · ${o.channel === 'market' ? (o.organizations?.vertical === 'food' ? 'nyansatek.food' : 'nyansatek.store') : 'own page'}</div></td>
+      <td>${E(o.organizations?.business_name)}<div class="note">${tel(sh.shop_phone || sh.whatsapp_number)}</div></td>
+      <td>${(o.online_order_items || []).map(i => `${i.qty} × ${E(i.name_snapshot)}`).join('<br>')}${o.customer_note ? `<div class="note">Note: ${E(o.customer_note)}</div>` : ''}</td>
+      <td>${E(o.customer_name)}<div class="note">${tel(o.customer_phone)}</div>${o.fulfilment === 'delivery' ? `<div class="note">${E(o.address || '')}${o.landmark ? ' · ' + E(o.landmark) : ''}${o.delivery_zones?.name ? ' · ' + E(o.delivery_zones.name) : ''}</div>` : `<div class="note">Pickup · ${E(o.pickup_points?.name || '')}</div>`}</td>
+      <td><b>${GH(o.goods_total)}</b><div class="note">${paid(o) ? 'MoMo ✓' : 'MoMo not yet'}${o.momo_txn_id ? ' · ID ' + E(o.momo_txn_id) : ''}</div><div class="note">Shop gets ${GH(o.base_total ?? o.goods_total)}</div></td>
+      <td><span class="pill ${pc}">${E(pt)}</span>${o.status === 'placed' && !paid(o) ? `<div class="note">${minsLeft(o)} min left to pay</div>` : ''}${o.cancel_reason && o.status === 'cancelled' ? `<div class="note">${E(o.cancel_reason)}${paid(o) ? ' · refund the MoMo' : ''}</div>` : ''}</td>
+      <td>${o.couriers ? `${E(o.couriers.name)}<div class="note">${tel(o.couriers.phone)}</div>` : ''}${courierSel}</td>
+      <td><div style="display:flex;gap:4px;flex-wrap:wrap;">${actions}${open ? ` <button class="btn bad" onclick="cancelOrder('${o.id}','${E(o.code)}')">Cancel</button>` : ''}</div></td></tr>`;
   };
-  const table = list => list.length ? `<table><tr><th>Order</th><th>Shop</th><th>Customer</th><th>Fulfilment</th><th>Total</th><th>Status</th><th>Delivery job</th><th></th></tr>${list.map(tr).join('')}</table>` : '<div class="empty">None.</div>';
-  M().innerHTML = `<h2>Live orders (${live.length})</h2><p class="note" style="margin-bottom:8px;">Highlighted: less than 4 minutes left for the shop to accept. Call them. Refreshes every 20 seconds.</p>${table(live)}
+  const table = list => list.length ? `<table><tr><th>Order</th><th>Shop / restaurant</th><th>Items</th><th>Customer</th><th>Paid</th><th>Status</th><th>Courier</th><th></th></tr>${list.map(tr).join('')}</table>` : '<div class="empty">None.</div>';
+  M().innerHTML = `<h2>Live orders (${live.length})</h2><p class="note" style="margin-bottom:8px;">1. Check the MoMo and press <b>Payment received</b>. 2. Call the shop to place the order, then <b>Shop confirmed</b>.
+    3. Choose a courier and call them. 4. <b>On the way</b>, then <b>Delivered</b>. SMS buttons are optional and cost SMS credit. Highlighted: needs attention. Refreshes every 20 seconds.</p>${table(live)}
     <h2 style="margin-top:20px;">Finished in the last 24 hours (${finished.length})</h2>${table(finished)}`;
 }
-async function assign(job, rider) { const { error } = await sb.rpc('ops_assign_job', { p_job: job, p_rider: rider || null }); if (error) fail(error); orders(); }
+async function orderAction(id, action, code) {
+  let note = null;
+  if (action === 'paid') { note = prompt(`Payment for ${code} is in NYANSATEK's MoMo? Enter the MoMo transaction ID (optional):`, ''); if (note === null) return; }
+  if (action === 'delivered' && !confirm(`Mark ${code} as delivered? The shop's sale is recorded and it is added to today's payouts.`)) return;
+  const { error } = await sb.rpc('ops_order_action', { p_order: id, p_action: action, p_note: note }); if (error) fail(error); orders();
+}
+async function setCourier(id, courier) { const { error } = await sb.rpc('ops_assign_courier', { p_order: id, p_courier: courier || null }); if (error) fail(error); orders(); }
+async function orderSms(id, to) {
+  const { data, error } = await sb.rpc('ops_order_sms', { p_order: id, p_to: to, p_send: false });
+  if (error) return fail(error);
+  if (!confirm(`Send this SMS to ${local(data.to)}?\n\n${data.text}`)) return;
+  const r = await sb.rpc('ops_order_sms', { p_order: id, p_to: to, p_send: true });
+  if (r.error) fail(r.error); else alert('SMS sent.');
+}
 async function cancelOrder(id, code) {
   const reason = prompt(`Cancel ${code}? Reason (the customer sees this):`, 'Cancelled by NYANSATEK');
   if (reason === null) return;
   const { error } = await sb.rpc('ops_cancel_order', { p_order: id, p_reason: reason }); if (error) fail(error); orders();
+}
+
+// ---------- couriers: outside riders and delivery services the team calls ----------
+async function couriers() {
+  const { data, error } = await sb.from('couriers').select('*').order('active', { ascending: false }).order('company').order('name');
+  if (error) return M().innerHTML = `<div class="err">${E(error.message)}</div>`;
+  M().innerHTML = `<h2>Couriers</h2><p class="note" style="margin-bottom:8px;">Riders and delivery services we call to collect and deliver orders. They charge the customer their delivery fee and keep it.</p>
+    <div class="box"><b>Add a courier</b><div class="row" style="margin-top:8px;">
+      <label class="fg">Name<input id="k-name" placeholder="e.g. Kofi or Rider 5"></label>
+      <label class="fg">Company (optional)<input id="k-co" placeholder="e.g. Classic Delivery Service"></label>
+      <label class="fg">Phone<input id="k-phone" type="tel" placeholder="024XXXXXXX"></label>
+      <label class="fg" style="flex:1;min-width:220px;">Notes<input id="k-notes" placeholder="Area, other numbers, hours"></label>
+      <button class="btn gold" id="k-add">Add</button></div></div>
+    ${(data || []).length ? `<table><tr><th>Courier</th><th>Phone</th><th>Notes</th><th>Active</th></tr>${data.map(c => `<tr style="${c.active ? '' : 'opacity:.55'}"><td><b>${E(c.name)}</b><div class="note">${E(c.company || '')}</div></td><td>${tel(c.phone)}</td><td class="note">${E(c.notes || '')}</td>
+      <td><input type="checkbox" ${c.active ? 'checked' : ''} onchange="sb.from('couriers').update({active:this.checked}).eq('id','${c.id}').then(r=>{if(r.error)fail(r.error);couriers();})"></td></tr>`).join('')}</table>` : '<div class="empty">No couriers yet.</div>'}`;
+  document.getElementById('k-add').onclick = async () => {
+    const v = id => document.getElementById(id).value.trim(), d = v('k-phone').replace(/\D/g, '');
+    const phone = /^0\d{9}$/.test(d) ? '233' + d.slice(1) : /^233\d{9}$/.test(d) ? d : null;
+    if (v('k-name').length < 2) return alert('Enter a name.');
+    if (!phone) return alert('Enter a valid phone number.');
+    const { error } = await sb.from('couriers').insert({ name: v('k-name'), company: v('k-co') || null, phone, notes: v('k-notes') || null });
+    if (error) fail(error); couriers();
+  };
+}
+
+// ---------- payouts: shops are paid their own prices by close of business ----------
+async function payouts() {
+  const [{ data: due, error }, { data: done }] = await Promise.all([
+    sb.rpc('ops_payouts_due'),
+    sb.from('org_payouts').select('*,organizations(business_name)').order('paid_at', { ascending: false }).limit(40)]);
+  if (error) return M().innerHTML = `<div class="err">${E(error.message)}</div>`;
+  const rows = due || [], total = rows.reduce((a, r) => a + Number(r.amount), 0);
+  M().innerHTML = `<h2>To pay: ${GH(total)}</h2><p class="note" style="margin-bottom:8px;">Delivered orders, at the shop's own prices (without the markup). Pay each by MoMo by close of business, then record it here.</p>
+    ${rows.length ? `<table><tr><th>Shop / restaurant</th><th>Pay to</th><th>Day</th><th>Orders</th><th>Amount</th><th></th></tr>${rows.map((r, i) => `<tr class="${new Date(r.day + 'T23:59:59') < new Date(Date.now() - 864e5) ? 'late' : ''}"><td><b>${E(r.name)}</b></td><td>${tel(r.phone)}</td><td>${E(r.day)}</td><td>${r.orders_count}</td><td><b>${GH(r.amount)}</b></td>
+      <td><button class="btn gold" onclick="markPayout(${i})">Paid</button></td></tr>`).join('')}</table>` : '<div class="empty">Nothing owed right now.</div>'}
+    <h2 style="margin-top:20px;">Paid recently</h2>
+    ${(done || []).length ? `<table><tr><th>Shop / restaurant</th><th>Day</th><th>Orders</th><th>Amount</th><th>MoMo ID</th><th>Paid</th></tr>${done.map(p => `<tr><td>${E(p.organizations?.business_name)}</td><td>${E(p.pay_date)}</td><td>${p.orders_count}</td><td>${GH(p.amount)}</td><td>${E(p.momo_ref || '—')}</td><td>${new Date(p.paid_at).toLocaleString()}</td></tr>`).join('')}</table>` : '<div class="empty">No payouts yet.</div>'}`;
+  window.PAYOUT_ROWS = rows;
+}
+async function markPayout(i) {
+  const r = window.PAYOUT_ROWS[i];
+  const ref = prompt(`You sent ${GH(r.amount)} to ${r.name} for ${r.day}? Enter the MoMo transaction ID:`, '');
+  if (ref === null) return;
+  const { error } = await sb.rpc('ops_mark_payout', { p_org: r.org_id, p_day: r.day, p_ref: ref }); if (error) fail(error); payouts();
 }
 
 // ---------- pickup desk ----------
@@ -175,30 +250,29 @@ async function cash() {
     (rows.length ? `<table><tr><th>Order</th><th>Shop</th><th>Held by</th><th>Amount</th><th>Since</th></tr>${rows.map(o => `<tr class="${Date.now() - new Date(o.delivered_at) > 864e5 ? 'late' : ''}"><td>${E(o.code)}</td><td>${E(o.organizations?.business_name)}</td><td>${E(holder(o))}</td><td>${GH(o.goods_total)}</td><td>${ago(o.delivered_at)}</td></tr>`).join('')}</table>` : '<div class="empty">All cash has been handed over.</div>');
 }
 
-// ---------- shops ----------
+// ---------- shops and restaurants ----------
+// Every business has a free online shop / menu page. The team decides who is listed on nyansatek.store / nyansatek.food.
 async function shops() {
-  const { data, error } = await sb.from('organizations').select('id,business_name,contact_email,is_active,shop_online_settings(*)').order('business_name');
+  const { data, error } = await sb.from('organizations').select('id,business_name,vertical,contact_email,is_active,shop_online_settings(*)').order('business_name');
   if (error) return M().innerHTML = `<div class="err">${E(error.message)}</div>`;
   const st = s => s ? (Array.isArray(s) ? s[0] : s) : null;
-  M().innerHTML = `<h2>Shops</h2><table><tr><th>Shop</th><th>Online Shop add-on</th><th>Paid until</th><th>Shop page</th><th>nyansatek.store</th></tr>${(data || []).map(o => {
-    const s = st(o.shop_online_settings) || {};
-    return `<tr><td><b>${E(o.business_name)}</b><div class="note">${E(o.contact_email || '')}</div></td>
-      <td><label><input type="checkbox" ${s.addon_active ? 'checked' : ''} onchange="setAddon('${o.id}',this.checked)"> ${s.addon_active ? 'On' : 'Off'}</label></td>
-      <td><input type="date" value="${E(s.addon_paid_through || '')}" onchange="setPaid('${o.id}',this.value)"></td>
-      <td>${s.store_slug ? `<a href="https://nyansatek.shop/shop/?s=${E(s.store_slug)}" target="_blank" rel="noopener">${E(s.store_slug)}</a>` : '<span class="note">not set up</span>'}</td>
-      <td><span class="pill ${s.marketplace_status === 'approved' ? 'ok' : s.marketplace_status === 'pending' ? 'warn' : s.marketplace_status === 'suspended' ? 'bad' : ''}">${E(s.marketplace_status || 'none')}</span>${s.listings_hidden_reason ? ` <span class="pill bad">${E(s.listings_hidden_reason.replace(/_/g, ' '))}</span>` : ''}
-        <div style="margin-top:4px;">${s.addon_active && s.marketplace_status !== 'approved' ? `<button class="btn" onclick="setMarket('${o.id}','approved')">Approve</button>` : ''}
-        ${s.marketplace_status === 'approved' ? `<button class="btn bad" onclick="setMarket('${o.id}','suspended')">Suspend</button>` : ''}</div></td></tr>`;
+  M().innerHTML = `<h2>Shops & restaurants</h2><p class="note" style="margin-bottom:8px;">Online shops and menus are free and switched on for everyone. List a business here once its products or menu are ready; customers then see them with the markup added.</p>
+    <table><tr><th>Business</th><th>Type</th><th>Phone</th><th>Own page</th><th>Listed on nyansatek.store / .food</th></tr>${(data || []).map(o => {
+    const s = st(o.shop_online_settings) || {}, food = o.vertical === 'food';
+    const page = s.store_slug ? (food ? `https://nyansatek.rest/menu/?s=${E(s.store_slug)}` : `https://nyansatek.shop/shop/?s=${E(s.store_slug)}`) : '';
+    return `<tr><td><b>${E(o.business_name)}</b><div class="note">${E(o.contact_email || 'no software login')}</div></td>
+      <td>${food ? 'Restaurant' : 'Shop'}</td><td>${tel(s.shop_phone || s.whatsapp_number)}</td>
+      <td>${page ? `<a href="${page}" target="_blank" rel="noopener">${E(s.store_slug)}</a>` : '<span class="note">no web address</span>'}</td>
+      <td><span class="pill ${s.marketplace_status === 'approved' ? 'ok' : s.marketplace_status === 'pending' ? 'warn' : s.marketplace_status === 'suspended' ? 'bad' : ''}">${s.marketplace_status === 'approved' ? 'listed' : s.marketplace_status === 'pending' ? 'waiting' : s.marketplace_status === 'suspended' ? 'hidden' : 'not listed'}</span>
+        <div style="margin-top:4px;">${s.marketplace_status !== 'approved' ? `<button class="btn" onclick="setMarket('${o.id}','approved')">List</button>` : `<button class="btn bad" onclick="setMarket('${o.id}','suspended')">Hide</button>`}</div></td></tr>`;
   }).join('')}</table>`;
 }
 async function upsertSettings(org, patch) {
-  const { error } = await sb.from('shop_online_settings').upsert(Object.assign({ org_id: org }, patch), { onConflict: 'org_id' });
+  const { error } = await sb.from('shop_online_settings').upsert(Object.assign({ org_id: org, addon_active: true }, patch), { onConflict: 'org_id' });
   if (error) fail(error); shops();
 }
-const setAddon = (org, on) => upsertSettings(org, { addon_active: on });
-const setPaid = (org, d) => upsertSettings(org, { addon_paid_through: d || null });
 async function setMarket(org, status) {
-  if (status === 'suspended' && !confirm('Hide all of this shop\'s products from nyansatek.store?')) return;
+  if (status === 'suspended' && !confirm('Hide all of this business\'s products from nyansatek.store / nyansatek.food?')) return;
   const { data: { user } } = await sb.auth.getUser();
   upsertSettings(org, Object.assign({ marketplace_status: status }, status === 'approved' ? { approved_at: new Date().toISOString(), approved_by: user.id } : {}));
 }
@@ -366,48 +440,29 @@ async function cats() {
   };
 }
 
-// ---------- billing ----------
+// ---------- settings: where customers pay, the markup and the payment window ----------
 async function billing() {
-  const [{ data: cfg }, { data: st, error }, { data: ap }] = await Promise.all([
-    sb.from('market_settings').select('*').maybeSingle(),
-    sb.from('commission_statements').select('*,organizations(business_name)').in('status', ['issued', 'overdue']).order('due_date'),
-    sb.from('addon_payments').select('*,organizations(business_name)').eq('status', 'submitted').order('submitted_at')]);
+  const { data: cfg, error } = await sb.from('market_settings').select('*').maybeSingle();
   if (error) return M().innerHTML = `<div class="err">${E(error.message)}</div>`;
-  const c = cfg || {}, month = d => new Date(d + 'T00:00:00').toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
-  M().innerHTML = `<h2>Billing</h2>
-    <div class="box"><b>Settings</b><div class="row" style="margin-top:8px;">
-      <label class="fg">Add-on price / month (GH₵)<input id="b-pm" type="number" min="0" step="1" value="${c.addon_price_monthly ?? ''}"></label>
-      <label class="fg">Add-on price / year (GH₵)<input id="b-py" type="number" min="0" step="1" value="${c.addon_price_yearly ?? ''}"></label>
-      <label class="fg">NYANSATEK MoMo number<input id="b-momo" type="tel" value="${c.nyansatek_momo_number ? local(c.nyansatek_momo_number) : ''}"></label>
+  const c = cfg || {};
+  M().innerHTML = `<h2>Settings</h2>
+    <div class="box"><b>Payments and pricing</b><div class="row" style="margin-top:8px;">
+      <label class="fg">NYANSATEK MoMo number (customers pay here)<input id="b-momo" type="tel" value="${c.nyansatek_momo_number ? local(c.nyansatek_momo_number) : ''}"></label>
       <label class="fg">MoMo account name<input id="b-momoname" value="${E(c.nyansatek_momo_name || '')}"></label>
-      <label class="fg">Commission %<input id="b-rate" type="number" min="0" max="50" step="0.5" value="${Number(c.commission_rate || 0.05) * 100}"></label>
-      <label class="fg">Days to pay a statement<input id="b-due" type="number" min="1" max="60" value="${c.commission_due_days ?? 7}"></label>
+      <label class="fg">Food markup per dish (GH₵)<input id="b-food" type="number" min="0" step="0.5" value="${c.food_markup_per_item ?? 5}"></label>
+      <label class="fg">Store markup (%)<input id="b-store" type="number" min="0" max="50" step="0.5" value="${Number(c.store_markup_rate ?? 0.05) * 100}"></label>
+      <label class="fg">Minutes to pay before an order is cancelled<input id="b-mins" type="number" min="5" max="240" value="${c.accept_minutes ?? 30}"></label>
       <button class="btn gold" id="b-save">Save</button></div>
-      <p class="note" style="margin-top:6px;">Statements are issued on the 1st of each month. Listings hide ${c.overdue_grace_days ?? 3} days after a statement's due date if unpaid. An add-on switches off ${c.overdue_grace_days ?? 3} days after its paid-until date.</p></div>
-    <h2>Add-on payments to confirm (${(ap || []).length})</h2>
-    ${(ap || []).length ? `<table><tr><th>Shop</th><th>Period</th><th>Amount</th><th>MoMo ID</th><th>Sent</th><th></th></tr>${ap.map(a => `<tr><td>${E(a.organizations?.business_name)}</td><td>${E(a.period)}</td><td>${GH(a.amount)}</td><td>${E(a.momo_txn_id)}</td><td>${ago(a.submitted_at)} ago</td>
-      <td><button class="btn" onclick="confirmAddon('${a.id}',true)">Received</button> <button class="btn bad" onclick="confirmAddon('${a.id}',false)">Not found</button></td></tr>`).join('')}</table>` : '<div class="empty">None waiting.</div>'}
-    <h2 style="margin-top:18px;">Unpaid commission statements (${(st || []).length})</h2>
-    ${(st || []).length ? `<table><tr><th>Shop</th><th>Month</th><th>Orders</th><th>Commission</th><th>Due</th><th>Status</th><th>MoMo ID</th><th></th></tr>${st.map(x => `<tr class="${x.status === 'overdue' ? 'late' : ''}"><td>${E(x.organizations?.business_name)}</td><td>${E(month(x.period_month))}</td><td>${x.orders_count}</td><td><b>${GH(x.commission_amount)}</b></td>
-      <td>${E(x.due_date || '')}</td><td><span class="pill ${x.status === 'overdue' ? 'bad' : 'warn'}">${E(x.status)}</span></td><td>${E(x.payment_ref || '—')}</td>
-      <td><button class="btn" onclick="confirmStmt('${x.id}',true)">Paid</button>${x.payment_ref ? ` <button class="btn bad" onclick="confirmStmt('${x.id}',false)">Not found</button>` : ''}</td></tr>`).join('')}</table>` : '<div class="empty">Nothing owed.</div>'}`;
+      <p class="note" style="margin-top:6px;">Customers see each shop price plus the markup. Shops are paid their own prices (Payouts). Changing the markup changes prices shown from now on; orders already placed keep their prices.</p></div>`;
   document.getElementById('b-save').onclick = async () => {
-    const v = id => document.getElementById(id).value.trim(), num = x => x === '' ? null : Number(x);
+    const v = id => document.getElementById(id).value.trim();
     const d = String(v('b-momo')).replace(/\D/g, ''), momo = /^0\d{9}$/.test(d) ? '233' + d.slice(1) : /^233\d{9}$/.test(d) ? d : null;
-    if (v('b-momo') && !momo) return alert('Enter a valid MoMo number.');
-    const { error } = await sb.from('market_settings').update({ addon_price_monthly: num(v('b-pm')), addon_price_yearly: num(v('b-py')), nyansatek_momo_number: momo,
-      nyansatek_momo_name: v('b-momoname') || null, commission_rate: Number(v('b-rate') || 5) / 100, commission_due_days: Number(v('b-due') || 7), updated_at: new Date().toISOString() }).eq('id', true);
+    if (!momo) return alert('Enter a valid MoMo number.');
+    const { error } = await sb.from('market_settings').update({ nyansatek_momo_number: momo, nyansatek_momo_name: v('b-momoname') || null,
+      food_markup_per_item: Number(v('b-food') || 0), store_markup_rate: Number(v('b-store') || 0) / 100, accept_minutes: Number(v('b-mins') || 30),
+      updated_at: new Date().toISOString() }).eq('id', true);
     if (error) fail(error); else alert('Saved.'); billing();
   };
-}
-async function confirmAddon(id, ok) {
-  const note = ok ? null : prompt('Why? (kept on record)', 'Payment not found');
-  if (!ok && note === null) return;
-  const { error } = await sb.rpc('ops_confirm_addon_payment', { p_payment: id, p_ok: ok, p_note: note }); if (error) fail(error); billing();
-}
-async function confirmStmt(id, paid) {
-  if (paid && !confirm('Mark this statement as paid? Check the MoMo transaction first.')) return;
-  const { error } = await sb.rpc('ops_confirm_statement', { p_statement: id, p_paid: paid }); if (error) fail(error); billing();
 }
 
 // ---------- team (master account only) ----------
