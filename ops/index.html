@@ -601,17 +601,18 @@ async function phone() {
   window.PO_ROWS = rows;
   const open = rows.filter(r => ['new', 'no_answer'].includes(r.status)), done = rows.filter(r => !open.includes(r));
   const cartTxt = r => (r.cart || []).map(i => `${i.qty} × ${E(i.name)}${i.shop ? ' <span class="note">(' + E(i.shop) + ')</span>' : ''}`).join('<br>');
-  const tr = r => `<tr class="${r.status === 'new' ? 'late' : ''}"><td><span class="pill ${r.kind === 'voice' ? 'warn' : ''}">${r.kind === 'voice' ? 'Voice note' : 'Call me back'}</span><div class="note">${ago(r.created_at)} ago · nyansatek.${E(r.site)}</div></td>
+  const tr = r => `<tr class="${r.status === 'new' ? 'late' : ''}"><td><span class="pill ${r.kind === 'voice' ? 'warn' : ''}">${({ voice: 'Voice note', callback: 'Call me back', call: 'Phone call' })[r.kind]}</span><div class="note">${ago(r.created_at)} ago · nyansatek.${E(r.site)}</div></td>
     <td>${E(r.customer_name || '—')}<div class="note">${tel(r.phone)}</div>${r.location ? `<div class="note">${E(r.location)}</div>` : ''}</td>
     <td>${r.audio_path ? (urls[r.audio_path] ? `<audio controls preload="none" src="${E(urls[r.audio_path])}" style="max-width:260px;"></audio>` : '<span class="note">Recording unavailable</span>') + (r.audio_seconds ? `<div class="note">${r.audio_seconds}s</div>` : '') : ''}
-      ${(r.cart || []).length ? `<div class="note" style="margin-top:4px;"><b>In their cart:</b><br>${cartTxt(r)}</div>` : ''}</td>
+      ${(r.cart || []).length ? `<div class="note" style="margin-top:4px;"><b>${r.kind === 'call' ? 'Ordered:' : 'In their cart:'}</b><br>${cartTxt(r)}</div>` : ''}</td>
     <td><span class="pill ${r.status === 'done' ? 'ok' : r.status === 'spam' ? 'bad' : r.status === 'no_answer' ? 'warn' : ''}">${({ new: 'new', no_answer: 'no answer yet', done: 'done', spam: 'spam' })[r.status]}</span>${r.checkout_code ? `<div class="note">Order ${E(r.checkout_code)}</div>` : ''}${r.team_note ? `<div class="note">${E(r.team_note)}</div>` : ''}</td>
     <td><div style="display:flex;gap:4px;flex-wrap:wrap;">${['new', 'no_answer'].includes(r.status) ? `<button class="btn gold" onclick="poFromRequest('${r.id}')">Make the order</button>
       <button class="btn sec" onclick="poMark('${r.id}','no_answer')">No answer</button><button class="btn sec" onclick="poMark('${r.id}','done')">Done, no order</button><button class="btn bad" onclick="poMark('${r.id}','spam')">Spam</button>` : ''}</div></td></tr>`;
   const table = list => list.length ? `<table><tr><th>Request</th><th>Customer</th><th>Voice note / cart</th><th>Status</th><th></th></tr>${list.map(tr).join('')}</table>` : '<div class="empty">None.</div>';
   M().innerHTML = `<h2>Phone orders</h2>
-    <p class="note" style="margin-bottom:8px;">Calls come to the numbers in Settings. Voice notes and call-back requests land here (and SMS the team alert phone). Listen or call the customer, then press <b>Make the order</b>.
-      The order is placed like an online order: the customer gets the MoMoPay SMS and tracking link, and it appears in Orders waiting for payment.</p>
+    <p class="note" style="margin-bottom:8px;"><b>Waiting</b> shows voice notes and call-back requests from customers. Listen or call them back, then press <b>Make the order</b>.
+      When a customer calls you directly, use <b>New phone order</b>. Either way the order is placed like an online order: the customer gets the MoMoPay SMS and tracking link,
+      the order goes to the <b>Orders</b> tab waiting for payment, and it is listed under Handled below with its order number.</p>
     <div id="po-form"></div>
     <button class="btn gold" id="po-new" onclick="poOpen()">New phone order</button>
     <h2 style="margin-top:18px;">Waiting (${open.length})</h2>${table(open)}
@@ -683,8 +684,12 @@ async function poPlace() {
   if (!confirm(`Place this order for ${PO.name || PO.phone} and text them how to pay?`)) return;
   const { data, error } = await sb.rpc('place_checkout', { p });
   if (error) return err.textContent = error.message;
-  if (PO.request) await sb.from('order_requests').update({ status: 'done', checkout_code: data.code, handled_by: (await sb.auth.getUser()).data.user?.id, handled_at: new Date().toISOString() }).eq('id', PO.request.id);
-  alert(`Order ${data.code} placed. The customer has been texted to pay ${GH(data.total)} by MoMoPay. It is in Orders, waiting for payment.`);
+  const me = (await sb.auth.getUser()).data.user?.id, nowIso = new Date().toISOString();
+  if (PO.request) await sb.from('order_requests').update({ status: 'done', checkout_code: data.code, handled_by: me, handled_at: nowIso }).eq('id', PO.request.id);
+  else await sb.from('order_requests').insert({ kind: 'call', site: PO.site, customer_name: PO.name || null, phone: '233' + String(PO.phone).replace(/\D/g, '').replace(/^(233|0)/, ''),
+    location: PO.loc || null, cart: PO.basket.map(i => ({ org_id: i.org_id, product_id: i.product_id, name: i.name, shop: i.shop, qty: i.qty, price: i.price })),
+    status: 'done', checkout_code: data.code, handled_by: me, handled_at: nowIso });
+  alert(`Order ${data.code} placed. The customer has been texted to pay ${GH(data.total)} by MoMoPay. Follow it in the Orders tab (waiting for payment).`);
   PO.formOpen = false; phone();
 }
 
