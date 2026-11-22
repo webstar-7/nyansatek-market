@@ -61,7 +61,7 @@ async function start() {
   const { data: me } = await sb.from('profiles').select('role,must_change_password,full_name').eq('id', session.user.id).maybeSingle();
   IS_MASTER = me?.role === 'master';
   if (me?.role === 'market_ops' && me.must_change_password) return choosePassword(session.user.email);
-  if (!IS_MASTER && TAB === 'team') TAB = 'orders';
+  if (!IS_MASTER && (TAB === 'team' || TAB === 'billing')) TAB = 'orders';
   shell(session.user.email, me?.full_name);
 }
 function choosePassword(email) {
@@ -96,7 +96,7 @@ function login(msg) {
 }
 function shell(email, name) {
   app.innerHTML = `<header><b>nyansatek<span>.store</span> · team</b><span class="note" style="color:#cbd5e1">${E(name ? name + ' (' + email + ')' : email)} · <a href="#" style="color:#fff" onclick="sb.auth.signOut().then(()=>login());return false;">Sign out</a></span></header>
-    <nav>${TABS.filter(([k]) => k !== 'team' || IS_MASTER).map(([k, l]) => `<button data-k="${k}" class="${TAB === k ? 'on' : ''}">${l}</button>`).join('')}</nav><main id="main"></main>`;
+    <nav>${TABS.filter(([k]) => (k !== 'team' && k !== 'billing') || IS_MASTER).map(([k, l]) => `<button data-k="${k}" class="${TAB === k ? 'on' : ''}">${l}</button>`).join('')}</nav><main id="main"></main>`;
   app.querySelectorAll('nav button').forEach(b => b.onclick = () => { TAB = b.dataset.k; location.hash = TAB; app.querySelectorAll('nav button').forEach(x => x.classList.toggle('on', x === b)); show(); });
   show(); watchOrders();
 }
@@ -128,7 +128,7 @@ async function watchOrders() {
 }
 function show() {
   clearInterval(timer);
-  const fn = { orders, couriers, payouts, refunds, menus, desk, cash, shops, riders, zones, points, cats, billing, team: IS_MASTER ? team : orders }[TAB] || orders;
+  const fn = { orders, couriers, payouts, refunds, menus, desk, cash, shops, riders, zones, points, cats, billing: IS_MASTER ? billing : orders, team: IS_MASTER ? team : orders }[TAB] || orders;
   fn(); if (TAB === 'orders') timer = setInterval(() => { if (!document.querySelector('#main select:focus')) fn(); }, 20000);
 }
 const M = () => document.getElementById('main');
@@ -604,7 +604,7 @@ async function team() {
   if (error) return M().innerHTML = `<div class="err">${E(error.message)}</div>`;
   const rows = data || []; TEAM = Object.fromEntries(rows.map(r => [r.id, r.full_name]));
   M().innerHTML = `<h2>Team members</h2>
-    <div class="box"><p class="note" style="margin-bottom:8px;">Give each person their own login. They sign in at <b>nyansatek.store/ops/</b> with their email and choose a private password the first time. Team members can use every tab except this one; only your master login can add, reset or switch off team accounts.</p>
+    <div class="box"><p class="note" style="margin-bottom:8px;">Give each person their own login. They sign in at <b>nyansatek.store/ops/</b> with their email and choose a private password the first time. Team members can use every tab except this one and Settings; only your master login can add, reset or switch off team accounts.</p>
     <div class="row"><label class="fg">Full name<input id="t-name"></label><label class="fg">Email<input id="t-email" type="email"></label><button class="btn gold" id="t-go">Create login</button></div>
     <div id="t-out" style="margin-top:8px;"></div></div>
     ${rows.length ? `<table><tr><th>Name</th><th>Email (their login)</th><th>Status</th><th>Last signed in</th><th></th></tr>${rows.map(r => `<tr>

@@ -447,7 +447,7 @@ function checkout() {
       <label><input type="radio" name="ful" value="delivery" checked> Deliver to me</label>
       <label class="${REF.points.length ? '' : 'dis'}"><input type="radio" name="ful" value="pickup" ${REF.points.length ? '' : 'disabled'}> Pick up at a NYANSATEK point</label></div></div>
     <div id="ful-delivery">
-      <div class="fg"><label>Delivery area</label><select id="c-zone"><option value="">Choose your area</option>${REF.zones.map(z => `<option value="${z.id}" ${saved.zone === z.id ? 'selected' : ''}>${E(z.name)}</option>`).join('')}</select></div>
+      <div class="fg"><label>Your location</label><input id="c-loc" autocomplete="address-level3" maxlength="200" placeholder="Area or town, e.g. Asonkore" value="${E(saved.loc || '')}"></div>
       <div class="fg"><label>Directions for the rider (optional)</label><input id="c-land" placeholder="e.g. near the Total filling station" value="${E(saved.land || '')}"></div>
       <p class="note">The rider will call you when they are close.</p></div>
     <div id="ful-pickup" style="display:none;"><div class="fg"><label>Pickup point</label><select id="c-point"><option value="">Choose a pickup point</option>${REF.points.map(p => `<option value="${p.id}">${E(p.name)} · ${E(p.address)}</option>`).join('')}</select></div>
@@ -463,24 +463,23 @@ function checkout() {
   const upd = () => {
     document.getElementById('ful-delivery').style.display = ful() === 'delivery' ? '' : 'none';
     document.getElementById('ful-pickup').style.display = ful() === 'pickup' ? '' : 'none';
-    const zone = document.getElementById('c-zone').value, fee = REF.fees.find(f => f.zone_id === zone && f.vehicle === 'motorbike');
-    const feeTxt = fee ? `About ${GH(fee.fee)}, paid to the rider` : 'Paid to the rider on arrival';
+    const feeTxt = 'Paid to the rider on arrival';
     document.getElementById('c-sum').innerHTML = `<div><span>Items</span><span>${GH(goods)}</span></div>${ful() === 'delivery' ? `<div><span>Delivery</span><span>${feeTxt}</span></div>` : ''}<div class="tot"><span>Pay by MoMo</span><span>${GH(goods)}</span></div>`;
   };
-  app.querySelectorAll('input[name=ful]').forEach(r => r.onchange = upd); document.getElementById('c-zone').onchange = upd; upd();
+  app.querySelectorAll('input[name=ful]').forEach(r => r.onchange = upd); upd();
   document.getElementById('c-go').onclick = async () => {
     const err = document.getElementById('c-err'), btn = document.getElementById('c-go'), v = id => document.getElementById(id).value.trim();
     err.textContent = '';
     if (alc && !document.getElementById('c-age').checked) { err.textContent = 'This order has alcohol. Tick the box to confirm you are 18 or older.'; return; }
-    if (ful() === 'delivery' && !v('c-zone')) { err.textContent = 'Choose your delivery area.'; return; }
+    if (ful() === 'delivery' && v('c-loc').length < 2) { err.textContent = 'Enter your location so the rider can find you.'; return; }
     const p = { items: items.map(i => ({ org_id: i.org, product_id: i.p.id, qty: i.qty })), customer: { name: v('c-name'), phone: v('c-phone') },
       fulfilment: ful(), payment_method: 'momo', note: v('c-note'), age_confirmed: alc };
-    if (ful() === 'delivery') Object.assign(p, { zone_id: v('c-zone'), address: '', landmark: v('c-land') }); else p.pickup_point_id = v('c-point');
+    if (ful() === 'delivery') Object.assign(p, { address: v('c-loc'), landmark: v('c-land') }); else p.pickup_point_id = v('c-point');
     btn.disabled = true; btn.textContent = 'Placing order…';
     const { data, error } = await sb.rpc('place_checkout', { p });
     btn.disabled = false; btn.textContent = 'Place order';
     if (error) { err.textContent = errMsg(error); return; }
-    store.set('buyer', { name: v('c-name'), phone: v('c-phone'), zone: v('c-zone'), land: v('c-land') });
+    store.set('buyer', { name: v('c-name'), phone: v('c-phone'), loc: v('c-loc'), land: v('c-land') });
     const mine = store.get('my-orders') || [];
     mine.unshift({ token: data.track_token, code: data.code, kind: 'k', shop: shops.map(([, c]) => c.shop.name).join(', '), at: Date.now() });
     store.set('my-orders', mine.slice(0, 50));
