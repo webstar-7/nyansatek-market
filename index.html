@@ -423,7 +423,8 @@ function cartPage() {
         <div class="qty"><button data-org="${org}" data-id="${i.p.id}" data-d="-1">−</button><span>${i.qty}</span><button data-org="${org}" data-id="${i.p.id}" data-d="1">+</button></div></div>`).join('')}</div>`;
   }).join('') + `<div class="box"><div class="sum" style="margin-top:0;"><div class="tot" style="border:0;margin:0;padding:0;"><span>Total</span><span>${GH(all)}</span></div></div>
       ${closed.length ? `<p class="err" style="margin:6px 0;">${E(closed.map(([, c]) => c.shop.name).join(', '))} ${closed.length === 1 ? 'is' : 'are'} closed right now. Remove ${closed.length === 1 ? 'its' : 'their'} items to check out.</p>`
-        : '<a class="btn gold" style="width:100%;" href="#/checkout" data-link>Checkout</a>'}</div>`;
+        : '<a class="btn gold" style="width:100%;" href="#/checkout" data-link>Checkout</a>'}
+      <p class="note" style="margin-top:10px;text-align:center;">Prefer to talk? <a href="#" onclick="openOrderByPhone();return false;">Order by phone or voice note</a></p></div>`;
   app.querySelectorAll('.qty button').forEach(btn => btn.onclick = () => { addToCart(CART[btn.dataset.org].items[btn.dataset.id].p, Number(btn.dataset.d)); cartPage(); });
 }
 
@@ -603,6 +604,165 @@ updateCartBtn(); route();
 // Lets the marketplace be installed as an app and open when the connection is poor.
 if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
 
+</script>
+<script>
+// ── ORDER BY PHONE: call to order, voice note, call me back ──────────────
+// Calls and voice notes go to NYANSATEK's own numbers (set in /ops Settings), never to the business.
+(function () {
+  const SITE = /food/.test(location.hostname) ? 'food' : 'store';
+  const esc = s => s == null ? '' : String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  const css = document.createElement('style');
+  css.textContent = `
+  .obp-fab{position:fixed;left:16px;bottom:16px;z-index:60;border:0;border-radius:999px;padding:12px 16px;background:var(--p);color:#fff;font-weight:700;font-size:.92rem;box-shadow:0 10px 26px rgba(0,0,0,.28);cursor:pointer;display:flex;align-items:center;gap:8px;}
+  .obp-fab svg{width:18px;height:18px;}
+  @media(max-width:720px){.obp-fab{left:12px;bottom:12px;padding:11px 14px;font-size:.85rem;}}
+  .obp-bg{position:fixed;inset:0;z-index:70;background:rgba(10,16,30,.55);display:flex;align-items:flex-end;justify-content:center;}
+  @media(min-width:721px){.obp-bg{align-items:center;}}
+  .obp{background:#fff;width:100%;max-width:460px;max-height:92vh;overflow:auto;border-radius:18px 18px 0 0;padding:18px 18px 22px;}
+  @media(min-width:721px){.obp{border-radius:18px;}}
+  .obp h2{margin:0 0 4px;font-size:1.15rem;color:var(--p);}
+  .obp .x{float:right;border:0;background:none;font-size:1.6rem;line-height:1;cursor:pointer;color:var(--g);}
+  .obp .opt{border:1px solid var(--b);border-radius:14px;padding:12px;margin:10px 0;}
+  .obp .opt h3{margin:0 0 4px;font-size:.98rem;}
+  .obp .call{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;margin-top:8px;text-decoration:none;}
+  .obp .call svg{width:18px;height:18px;flex:none;}
+  .obp .rec{display:flex;align-items:center;gap:10px;margin-top:8px;}
+  .obp .recbtn{width:56px;height:56px;border-radius:50%;border:0;background:#d92d20;color:#fff;font-weight:800;cursor:pointer;flex:none;}
+  .obp .recbtn.on{animation:obpPulse 1s infinite;}
+  @keyframes obpPulse{0%{box-shadow:0 0 0 0 rgba(217,45,32,.5)}100%{box-shadow:0 0 0 14px rgba(217,45,32,0)}}
+  .obp audio{width:100%;margin-top:8px;}
+  .obp .ok{background:#ecfdf3;border:1px solid #abefc6;color:#05603a;border-radius:12px;padding:12px;margin-top:10px;}
+  .obp .tabs{display:flex;gap:6px;margin:12px 0 0;}
+  .obp .tabs button{flex:1;border:1px solid var(--b);background:#fff;border-radius:10px;padding:8px 4px;font-weight:700;font-size:.8rem;cursor:pointer;color:var(--p);}
+  .obp .tabs button.on{background:var(--p);color:#fff;border-color:var(--p);}`;
+  document.head.appendChild(css);
+
+  const PHONE_SVG = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1A17 17 0 0 1 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1l-2.3 2.2z"/></svg>';
+  const fab = document.createElement('button');
+  fab.className = 'obp-fab'; fab.type = 'button'; fab.innerHTML = PHONE_SVG + '<span>Order by phone</span>';
+  fab.onclick = () => window.openOrderByPhone();
+  document.body.appendChild(fab);
+
+  let INFO = null;
+  async function info() {
+    try { const { data } = await sb.rpc('phone_ordering'); if (data) INFO = data; } catch (e) {}
+    return INFO || { phones: ['0536340578'], opens_at: '09:00', closes_at: '21:00', open_now: true };
+  }
+  const t12 = hm => { const [h, m] = String(hm).split(':').map(Number); const ap = h >= 12 ? 'pm' : 'am'; const h12 = h % 12 || 12; return h12 + (m ? ':' + String(m).padStart(2, '0') : '') + ap; };
+  const pretty = n => String(n).replace(/^(\d{3})(\d{3})(\d{4})$/, '$1 $2 $3');
+  const cartSummary = () => {
+    try {
+      return Object.entries(CART || {}).flatMap(([org, c]) => Object.values(c.items).map(i => ({ org_id: org, product_id: i.p.id, shop: c.shop.name, name: i.p.name, qty: i.qty, price: i.p.price })));
+    } catch (e) { return []; }
+  };
+  const buyer = () => { try { return JSON.parse(localStorage.getItem('buyer')) || {}; } catch (e) { return {}; } };
+
+  let rec = null, chunks = [], blob = null, ext = 'webm', mime = 'audio/webm', secs = 0, tick = null;
+  function stopTracks() { try { rec && rec.stream.getTracks().forEach(t => t.stop()); } catch (e) {} }
+  function close() { stopTracks(); clearInterval(tick); rec = null; const b = document.getElementById('obp-bg'); if (b) b.remove(); }
+
+  window.openOrderByPhone = async function (tab) {
+    close();
+    const I = await info(); const hours = `${t12(I.opens_at)} to ${t12(I.closes_at)}`;
+    const cart = cartSummary(), b = buyer();
+    const cartNote = cart.length ? `<p class="note" style="margin-top:6px;">Your cart (${cart.reduce((a, i) => a + i.qty, 0)} item${cart.length > 1 || cart[0].qty > 1 ? 's' : ''}) is sent along with it.</p>` : '';
+    const bg = document.createElement('div'); bg.className = 'obp-bg'; bg.id = 'obp-bg';
+    bg.onclick = e => { if (e.target === bg) close(); };
+    bg.innerHTML = `<div class="obp" role="dialog" aria-modal="true" aria-label="Order by phone">
+      <button class="x" type="button" aria-label="Close">×</button>
+      <h2>Order by phone</h2>
+      <p class="note">${I.open_now ? `We're answering now, ${hours} every day.` : `Our lines are closed now. We answer ${hours}. Send a voice note or ask us to call you, and we'll get back to you when we open.`}</p>
+      ${I.open_now ? `<div class="opt"><h3>Call to order</h3><p class="note">Tell us what you want and where you are. We'll text you how to pay.</p>
+        ${I.phones.map(n => `<a class="btn gold call" href="tel:${esc(n)}">${PHONE_SVG}<span>Call ${esc(pretty(n))}</span></a>`).join('')}</div>` : ''}
+      <div class="tabs"><button type="button" data-t="voice" class="on">Send a voice note</button><button type="button" data-t="callback">Call me back</button></div>
+      <div class="opt" id="obp-body"></div>
+    </div>`;
+    document.body.appendChild(bg);
+    bg.querySelector('.x').onclick = close;
+    const body = bg.querySelector('#obp-body');
+    const fields = `<div class="fg"><label>Your name</label><input id="obp-name" autocomplete="name" value="${esc(b.name || '')}"></div>
+      <div class="fg"><label>Phone number we should call</label><input id="obp-phone" type="tel" autocomplete="tel" placeholder="024XXXXXXX" value="${esc(b.phone || '')}"></div>`;
+    const show = t => {
+      bg.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('on', x.dataset.t === t));
+      stopTracks(); clearInterval(tick); rec = null; blob = null; secs = 0;
+      if (t === 'voice') {
+        body.innerHTML = `<h3>Send your order as a voice note</h3>
+          <p class="note">Say what you want, how many, and where you are. Up to 2 minutes.</p>
+          <div class="rec"><button class="recbtn" id="obp-rec" type="button" aria-label="Record">REC</button>
+            <div><b id="obp-time">0:00</b><div class="note" id="obp-hint">Tap to start recording</div></div></div>
+          <audio id="obp-play" controls style="display:none"></audio>
+          ${fields}
+          <div class="fg"><label>Your location (optional)</label><input id="obp-loc" placeholder="Area or town" value="${esc(b.loc || '')}"></div>
+          ${cartNote}<div class="err" id="obp-err"></div>
+          <button class="btn gold" style="width:100%;margin-top:6px;" id="obp-send" type="button" disabled>Send voice note</button>`;
+        body.querySelector('#obp-rec').onclick = toggleRec;
+      } else {
+        body.innerHTML = `<h3>Call me back</h3><p class="note">Leave your number and the team will call you${I.open_now ? ' shortly' : ` from ${t12(I.opens_at)}`}. It doesn't cost you airtime.</p>
+          ${fields}${cartNote}<div class="err" id="obp-err"></div>
+          <button class="btn gold" style="width:100%;margin-top:6px;" id="obp-send" type="button">Call me back</button>`;
+      }
+      body.querySelector('#obp-send').onclick = () => send(t, I);
+    };
+    bg.querySelectorAll('.tabs button').forEach(x => x.onclick = () => show(x.dataset.t));
+    show(tab === 'callback' ? 'callback' : 'voice');
+  };
+
+  async function toggleRec() {
+    const btn = document.getElementById('obp-rec'), hint = document.getElementById('obp-hint'), err = document.getElementById('obp-err');
+    err.textContent = '';
+    if (rec && rec.state === 'recording') { rec.stop(); return; }
+    if (!navigator.mediaDevices || !window.MediaRecorder) { err.textContent = "This browser can't record. Use Call me back instead, or open the page in Chrome."; return; }
+    let stream;
+    try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+    catch (e) { err.textContent = 'Allow the microphone to record a voice note, or use Call me back.'; return; }
+    const pick = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus', 'audio/aac'].find(m => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m));
+    rec = pick ? new MediaRecorder(stream, { mimeType: pick }) : new MediaRecorder(stream);
+    mime = (rec.mimeType || pick || 'audio/webm').split(';')[0];
+    ext = { 'audio/webm': 'webm', 'audio/mp4': 'm4a', 'audio/ogg': 'ogg', 'audio/aac': 'aac', 'audio/mpeg': 'mp3', 'audio/x-m4a': 'm4a' }[mime] || 'webm';
+    chunks = []; blob = null; secs = 0;
+    rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+    rec.onstop = () => {
+      clearInterval(tick); stopTracks(); btn.classList.remove('on'); btn.textContent = 'REC';
+      blob = new Blob(chunks, { type: mime });
+      const a = document.getElementById('obp-play'); if (a) { a.src = URL.createObjectURL(blob); a.style.display = ''; }
+      hint.textContent = 'Listen back, or tap REC to record again';
+      document.getElementById('obp-send').disabled = !blob.size;
+    };
+    rec.start(); btn.classList.add('on'); btn.textContent = 'STOP'; hint.textContent = 'Recording… tap STOP when you finish';
+    document.getElementById('obp-send').disabled = true; document.getElementById('obp-play').style.display = 'none';
+    tick = setInterval(() => {
+      secs++; document.getElementById('obp-time').textContent = Math.floor(secs / 60) + ':' + String(secs % 60).padStart(2, '0');
+      if (secs >= 120 && rec && rec.state === 'recording') rec.stop();
+    }, 1000);
+  }
+
+  async function send(kind, I) {
+    const err = document.getElementById('obp-err'), btn = document.getElementById('obp-send');
+    const v = id => (document.getElementById(id)?.value || '').trim();
+    err.textContent = '';
+    if (!/^(\+?233|0)?\d{9}$/.test(v('obp-phone').replace(/\s/g, ''))) { err.textContent = 'Enter the phone number we should call.'; return; }
+    if (kind === 'voice' && !(blob && blob.size)) { err.textContent = 'Record your voice note first.'; return; }
+    btn.disabled = true; btn.textContent = 'Sending…';
+    try {
+      const p = { kind, site: SITE, name: v('obp-name'), phone: v('obp-phone'), location: v('obp-loc'), cart: cartSummary() };
+      if (kind === 'voice') {
+        const id = (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16); }));
+        const path = `new/${id}.${ext}`;
+        const up = await sb.storage.from('voice-orders').upload(path, blob, { contentType: mime, upsert: false });
+        if (up.error) throw up.error;
+        Object.assign(p, { audio_path: path, seconds: secs });
+      }
+      const { data, error } = await sb.rpc('submit_order_request', { p });
+      if (error) throw error;
+      try { const b = buyer(); localStorage.setItem('buyer', JSON.stringify(Object.assign(b, { name: p.name || b.name, phone: p.phone, loc: p.location || b.loc }))); } catch (e) {}
+      const when = data && data.open_now ? 'shortly' : `when we open at ${t12((data && data.opens_at) || I.opens_at)}`;
+      document.getElementById('obp-body').innerHTML = `<div class="ok"><b>${kind === 'voice' ? 'Voice note sent.' : 'Got it.'}</b><br>The team will call you on ${esc(v('obp-phone') || p.phone)} ${when} to confirm your order. We'll text you how to pay.</div>`;
+    } catch (e) {
+      btn.disabled = false; btn.textContent = kind === 'voice' ? 'Send voice note' : 'Call me back';
+      err.textContent = (e && e.message) || 'Something went wrong. Please try again.';
+    }
+  }
+})();
 </script>
 <script>
 // ---------- "Get the app" wall for visitors who scan the printed QR code ----------

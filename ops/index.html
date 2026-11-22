@@ -49,7 +49,7 @@ const local = p => p ? '0' + String(p).slice(3) : '';
 const ago = t => { const m = Math.round((Date.now() - new Date(t)) / 60000); return m < 60 ? m + ' min' : Math.round(m / 60) + ' h'; };
 const VEH = ['motorbike', 'car', 'van', 'truck'], RANK = { motorbike: 1, car: 2, van: 3, truck: 4 };
 const app = document.getElementById('app');
-const TABS = [['orders', 'Orders'], ['couriers', 'Couriers'], ['payouts', 'Payouts'], ['refunds', 'Refunds'], ['menus', 'Menus'], ['shops', 'Shops & restaurants'], ['desk', 'Pickup desk'], ['riders', 'Rider app'], ['zones', 'Zones'], ['points', 'Pickup points'], ['cats', 'Categories'], ['billing', 'Settings'], ['team', 'Team']];
+const TABS = [['orders', 'Orders'], ['phone', 'Phone orders'], ['couriers', 'Couriers'], ['payouts', 'Payouts'], ['refunds', 'Refunds'], ['menus', 'Menus'], ['shops', 'Shops & restaurants'], ['desk', 'Pickup desk'], ['riders', 'Rider app'], ['zones', 'Zones'], ['points', 'Pickup points'], ['cats', 'Categories'], ['billing', 'Settings'], ['team', 'Team']];
 let TAB = location.hash.slice(1) || 'orders', timer = null, IS_MASTER = false;
 const fail = e => alert(e?.message || String(e));
 
@@ -125,10 +125,23 @@ async function watchOrders() {
     SEEN = keys;
   };
   check(); setInterval(check, 15000);
+  let seenReq = null;
+  const checkReq = async () => {
+    const { data } = await sb.from('order_requests').select('id,kind').eq('status', 'new');
+    const ids = new Set((data || []).map(r => r.id)), n = ids.size;
+    const btn = document.querySelector('nav button[data-k="phone"]'); if (btn) btn.textContent = n ? `Phone orders (${n})` : 'Phone orders';
+    if (seenReq && [...ids].some(id => !seenReq.has(id))) {
+      beep();
+      try { if (window.Notification && Notification.permission === 'granted') new Notification('NYANSATEK phone orders', { body: 'New voice note or call-back request' }); } catch (e) {}
+      if (TAB === 'phone' && !PO.formOpen) phone();
+    }
+    seenReq = ids;
+  };
+  checkReq(); setInterval(checkReq, 15000);
 }
 function show() {
   clearInterval(timer);
-  const fn = { orders, couriers, payouts, refunds, menus, desk, cash, shops, riders, zones, points, cats, billing: IS_MASTER ? billing : orders, team: IS_MASTER ? team : orders }[TAB] || orders;
+  const fn = { orders, phone, couriers, payouts, refunds, menus, desk, cash, shops, riders, zones, points, cats, billing: IS_MASTER ? billing : orders, team: IS_MASTER ? team : orders }[TAB] || orders;
   fn(); if (TAB === 'orders') timer = setInterval(() => { if (!document.querySelector('#main select:focus')) fn(); }, 20000);
 }
 const M = () => document.getElementById('main');
@@ -568,6 +581,113 @@ async function cats() {
   };
 }
 
+
+// ---------- phone orders: voice notes, call-back requests, and orders the team takes by phone ----------
+// Customers call NYANSATEK's numbers, send a voice note or ask for a call back (nyansatek.store / .food).
+// The team listens or calls, then builds the order here; it is placed exactly like an online order
+// (place_checkout), so the customer gets the MoMoPay SMS and a tracking link.
+let PO = { site: 'store', basket: [], request: null, results: [] };
+async function phone() {
+  const { data, error } = await sb.from('order_requests').select('*').or(`status.in.(new,no_answer),created_at.gte.${new Date(Date.now() - 2 * 864e5).toISOString()}`)
+    .order('created_at', { ascending: false }).limit(200);
+  if (error) return M().innerHTML = `<div class="err">${E(error.message)}</div>`;
+  const rows = data || [];
+  const urls = {};
+  const withAudio = rows.filter(r => r.audio_path);
+  if (withAudio.length) {
+    const { data: signed } = await sb.storage.from('voice-orders').createSignedUrls(withAudio.map(r => r.audio_path), 3600);
+    (signed || []).forEach(s => { if (s.signedUrl) urls[s.path] = s.signedUrl; });
+  }
+  window.PO_ROWS = rows;
+  const open = rows.filter(r => ['new', 'no_answer'].includes(r.status)), done = rows.filter(r => !open.includes(r));
+  const cartTxt = r => (r.cart || []).map(i => `${i.qty} × ${E(i.name)}${i.shop ? ' <span class="note">(' + E(i.shop) + ')</span>' : ''}`).join('<br>');
+  const tr = r => `<tr class="${r.status === 'new' ? 'late' : ''}"><td><span class="pill ${r.kind === 'voice' ? 'warn' : ''}">${r.kind === 'voice' ? 'Voice note' : 'Call me back'}</span><div class="note">${ago(r.created_at)} ago · nyansatek.${E(r.site)}</div></td>
+    <td>${E(r.customer_name || '—')}<div class="note">${tel(r.phone)}</div>${r.location ? `<div class="note">${E(r.location)}</div>` : ''}</td>
+    <td>${r.audio_path ? (urls[r.audio_path] ? `<audio controls preload="none" src="${E(urls[r.audio_path])}" style="max-width:260px;"></audio>` : '<span class="note">Recording unavailable</span>') + (r.audio_seconds ? `<div class="note">${r.audio_seconds}s</div>` : '') : ''}
+      ${(r.cart || []).length ? `<div class="note" style="margin-top:4px;"><b>In their cart:</b><br>${cartTxt(r)}</div>` : ''}</td>
+    <td><span class="pill ${r.status === 'done' ? 'ok' : r.status === 'spam' ? 'bad' : r.status === 'no_answer' ? 'warn' : ''}">${({ new: 'new', no_answer: 'no answer yet', done: 'done', spam: 'spam' })[r.status]}</span>${r.checkout_code ? `<div class="note">Order ${E(r.checkout_code)}</div>` : ''}${r.team_note ? `<div class="note">${E(r.team_note)}</div>` : ''}</td>
+    <td><div style="display:flex;gap:4px;flex-wrap:wrap;">${['new', 'no_answer'].includes(r.status) ? `<button class="btn gold" onclick="poFromRequest('${r.id}')">Make the order</button>
+      <button class="btn sec" onclick="poMark('${r.id}','no_answer')">No answer</button><button class="btn sec" onclick="poMark('${r.id}','done')">Done, no order</button><button class="btn bad" onclick="poMark('${r.id}','spam')">Spam</button>` : ''}</div></td></tr>`;
+  const table = list => list.length ? `<table><tr><th>Request</th><th>Customer</th><th>Voice note / cart</th><th>Status</th><th></th></tr>${list.map(tr).join('')}</table>` : '<div class="empty">None.</div>';
+  M().innerHTML = `<h2>Phone orders</h2>
+    <p class="note" style="margin-bottom:8px;">Calls come to the numbers in Settings. Voice notes and call-back requests land here (and SMS the team alert phone). Listen or call the customer, then press <b>Make the order</b>.
+      The order is placed like an online order: the customer gets the MoMoPay SMS and tracking link, and it appears in Orders waiting for payment.</p>
+    <div id="po-form"></div>
+    <button class="btn gold" id="po-new" onclick="poOpen()">New phone order</button>
+    <h2 style="margin-top:18px;">Waiting (${open.length})</h2>${table(open)}
+    <h2 style="margin-top:18px;">Handled in the last 2 days (${done.length})</h2>${table(done)}`;
+  if (PO.formOpen) poRender();
+}
+async function poMark(id, status) {
+  let note = null;
+  if (status === 'done') { note = prompt('Note (optional), e.g. "customer will order later":', ''); if (note === null) return; }
+  const { error } = await sb.from('order_requests').update({ status, team_note: note || null, handled_by: (await sb.auth.getUser()).data.user?.id, handled_at: new Date().toISOString() }).eq('id', id);
+  if (error) fail(error); phone();
+}
+function poOpen(req) {
+  PO = { site: req?.site || 'store', basket: [], request: req || null, results: [], formOpen: true,
+    name: req?.customer_name || '', phone: req ? local(req.phone) : '', loc: req?.location || '' };
+  (req?.cart || []).forEach(i => { if (i.product_id && i.org_id) PO.basket.push({ product_id: i.product_id, org_id: i.org_id, name: i.name, shop: i.shop, price: Number(i.price) || 0, qty: i.qty }); });
+  poRender(); document.getElementById('po-form').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function poFromRequest(id) { poOpen((window.PO_ROWS || []).find(r => r.id === id)); }
+function poClose() { PO.formOpen = false; document.getElementById('po-form').innerHTML = ''; document.getElementById('po-new').style.display = ''; }
+function poKeep() { ['name', 'phone', 'loc', 'land', 'note'].forEach(k => { const el = document.getElementById('po-' + k); if (el) PO[k] = el.value; }); }
+function poRender() {
+  const box = document.getElementById('po-form'); if (!box) return;
+  document.getElementById('po-new').style.display = 'none';
+  const total = PO.basket.reduce((a, i) => a + i.price * i.qty, 0);
+  box.innerHTML = `<div class="box" style="border-color:var(--a);">
+    <div style="display:flex;justify-content:space-between;align-items:center;"><b>${PO.request ? 'Order for ' + E(PO.request.customer_name || local(PO.request.phone)) : 'New phone order'}</b><button class="btn sec" onclick="poClose()">Close</button></div>
+    <div class="row" style="margin-top:8px;">
+      <label class="fg">Site<select id="po-site" onchange="poKeep();PO.site=this.value;PO.results=[];poRender()"><option value="store" ${PO.site === 'store' ? 'selected' : ''}>nyansatek.store</option><option value="food" ${PO.site === 'food' ? 'selected' : ''}>nyansatek.food</option></select></label>
+      <label class="fg" style="flex:2;">Find a product or dish<input id="po-q" placeholder="Type a name, e.g. jollof, rice, fridge" oninput="poSearch(this.value)"></label></div>
+    <div id="po-res">${PO.results.map((p, i) => `<div class="line" style="display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--b);"><span>${E(p.name)} <span class="note">· ${E(p.shop_name)}${p.in_stock ? '' : ' · out of stock'}</span></span><span><b>${GH(p.price)}</b> <button class="btn sec" onclick="poAdd(${i})" ${p.in_stock ? '' : 'disabled'}>Add</button></span></div>`).join('')}</div>
+    <div style="margin-top:10px;"><b>Order</b>${PO.basket.length ? PO.basket.map((i, k) => `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:4px 0;"><span>${E(i.name)} <span class="note">· ${E(i.shop || '')}</span></span>
+      <span><button class="btn sec" onclick="poQty(${k},-1)">−</button> <b>${i.qty}</b> <button class="btn sec" onclick="poQty(${k},1)">+</button> ${GH(i.price * i.qty)}</span></div>`).join('') + `<div style="text-align:right;margin-top:4px;"><b>Customer pays ${GH(total)}</b> <span class="note">by MoMo · rider's fee paid on delivery</span></div>` : '<div class="note">Nothing added yet.</div>'}</div>
+    <div class="row" style="margin-top:8px;">
+      <label class="fg">Customer name<input id="po-name" value="${E(PO.name || '')}"></label>
+      <label class="fg">Customer phone<input id="po-phone" type="tel" value="${E(PO.phone || '')}"></label>
+      <label class="fg">Location<input id="po-loc" placeholder="Area or town" value="${E(PO.loc || '')}"></label>
+      <label class="fg">Directions for the rider<input id="po-land" value="${E(PO.land || '')}"></label>
+      <label class="fg" style="flex:2;">Note for the shop / restaurant<input id="po-note" maxlength="300" value="${E(PO.note || '')}"></label></div>
+    <div class="err" id="po-err"></div>
+    <button class="btn gold" onclick="poPlace()" ${PO.basket.length ? '' : 'disabled'}>Place order and text the customer</button></div>`;
+}
+let poTimer = null;
+function poSearch(q) {
+  clearTimeout(poTimer);
+  poTimer = setTimeout(async () => {
+    if (q.trim().length < 2) { PO.results = []; } else {
+      const { data, error } = await sb.rpc(PO.site === 'food' ? 'food_listings' : 'market_listings', { p_q: q.trim(), p_limit: 25 });
+      if (error) return fail(error);
+      PO.results = data || [];
+    }
+    poKeep(); const keepQ = document.getElementById('po-q').value; poRender();
+    const qi = document.getElementById('po-q'); qi.value = keepQ; qi.focus();
+  }, 300);
+}
+function poAdd(i) {
+  poKeep(); const p = PO.results[i]; const ex = PO.basket.find(b => b.product_id === p.id);
+  if (ex) ex.qty++; else PO.basket.push({ product_id: p.id, org_id: p.org_id, name: p.name, shop: p.shop_name, price: Number(p.price), qty: 1 });
+  const keepQ = document.getElementById('po-q').value; poRender(); document.getElementById('po-q').value = keepQ;
+}
+function poQty(k, d) { poKeep(); PO.basket[k].qty += d; if (PO.basket[k].qty <= 0) PO.basket.splice(k, 1); poRender(); }
+async function poPlace() {
+  poKeep();
+  const err = document.getElementById('po-err'); err.textContent = '';
+  if (!PO.basket.length) return err.textContent = 'Add at least one item.';
+  if (String(PO.loc || '').trim().length < 2) return err.textContent = "Enter the customer's location.";
+  const p = { items: PO.basket.map(i => ({ org_id: i.org_id, product_id: i.product_id, qty: i.qty })), customer: { name: PO.name, phone: PO.phone },
+    fulfilment: 'delivery', payment_method: 'momo', address: PO.loc, landmark: PO.land || '', note: PO.note || '' };
+  if (!confirm(`Place this order for ${PO.name || PO.phone} and text them how to pay?`)) return;
+  const { data, error } = await sb.rpc('place_checkout', { p });
+  if (error) return err.textContent = error.message;
+  if (PO.request) await sb.from('order_requests').update({ status: 'done', checkout_code: data.code, handled_by: (await sb.auth.getUser()).data.user?.id, handled_at: new Date().toISOString() }).eq('id', PO.request.id);
+  alert(`Order ${data.code} placed. The customer has been texted to pay ${GH(data.total)} by MoMoPay. It is in Orders, waiting for payment.`);
+  PO.formOpen = false; phone();
+}
+
 // ---------- settings: where customers pay, the markup and the payment window ----------
 async function billing() {
   const { data: cfg, error } = await sb.from('market_settings').select('*').maybeSingle();
@@ -583,7 +703,14 @@ async function billing() {
       <label class="fg">Store markup (%)<input id="b-store" type="number" min="0" max="50" step="0.5" value="${Number(c.store_markup_rate ?? 0.05) * 100}"></label>
       <label class="fg">Minutes to pay before an order is cancelled<input id="b-mins" type="number" min="5" max="240" value="${c.accept_minutes ?? 30}"></label>
       <button class="btn gold" id="b-save">Save</button></div>
-      <p class="note" style="margin-top:6px;">Customers see each shop price plus the markup. Shops are paid their own prices (Payouts). Changing the markup changes prices shown from now on; orders already placed keep their prices.</p></div>`;
+      <p class="note" style="margin-top:6px;">Customers see each shop price plus the markup. Shops are paid their own prices (Payouts). Changing the markup changes prices shown from now on; orders already placed keep their prices.</p></div>
+    <div class="box"><b>Order by phone</b><div class="row" style="margin-top:8px;">
+      <label class="fg" style="flex:2;">Numbers customers call to order (one per line)<textarea id="b-phones" rows="3">${E((c.order_phones || []).map(local).join('\n'))}</textarea></label>
+      <label class="fg">Lines open at<input id="b-popen" type="time" value="${E(String(c.phone_opens_at || '09:00').slice(0, 5))}"></label>
+      <label class="fg">Lines close at<input id="b-pclose" type="time" value="${E(String(c.phone_closes_at || '21:00').slice(0, 5))}"></label>
+      <button class="btn gold" id="b-psave">Save</button></div>
+      <p class="note" style="margin-top:6px;">The Call button on nyansatek.store and nyansatek.food shows these numbers only between these times (Ghana time). Outside them, customers can still send a voice note or ask for a call back.</p></div>
+`;
   document.getElementById('b-save').onclick = async () => {
     const v = id => document.getElementById(id).value.trim();
     const d = String(v('b-momo')).replace(/\D/g, ''), momo = /^0\d{9}$/.test(d) ? '233' + d.slice(1) : /^233\d{9}$/.test(d) ? d : null;
@@ -594,6 +721,15 @@ async function billing() {
       nyansatek_momo_merchant_id: v('b-merchant') || null, team_alert_phone: alertPhone,
       food_markup_per_item: Number(v('b-food') || 0), store_markup_rate: Number(v('b-store') || 0) / 100, accept_minutes: Number(v('b-mins') || 30),
       updated_at: new Date().toISOString() }).eq('id', true);
+    if (error) fail(error); else alert('Saved.'); billing();
+  };
+  document.getElementById('b-psave').onclick = async () => {
+    const lines = document.getElementById('b-phones').value.split(/[\n,]+/).map(x => x.replace(/\D/g, '')).filter(Boolean);
+    const phones = lines.map(d => /^0\d{9}$/.test(d) ? '233' + d.slice(1) : /^233\d{9}$/.test(d) ? d : null);
+    if (!phones.length || phones.includes(null)) return alert('Enter at least one valid phone number, one per line (e.g. 0536340578).');
+    const o = document.getElementById('b-popen').value, cl = document.getElementById('b-pclose').value;
+    if (!o || !cl || o >= cl) return alert('Lines must open before they close.');
+    const { error } = await sb.from('market_settings').update({ order_phones: [...new Set(phones)], phone_opens_at: o, phone_closes_at: cl, updated_at: new Date().toISOString() }).eq('id', true);
     if (error) fail(error); else alert('Saved.'); billing();
   };
 }
