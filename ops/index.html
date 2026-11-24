@@ -49,7 +49,7 @@ const local = p => p ? '0' + String(p).slice(3) : '';
 const ago = t => { const m = Math.round((Date.now() - new Date(t)) / 60000); return m < 60 ? m + ' min' : Math.round(m / 60) + ' h'; };
 const VEH = ['motorbike', 'car', 'van', 'truck'], RANK = { motorbike: 1, car: 2, van: 3, truck: 4 };
 const app = document.getElementById('app');
-const TABS = [['orders', 'Orders'], ['phone', 'Phone orders'], ['couriers', 'Couriers'], ['payouts', 'Payouts'], ['refunds', 'Refunds'], ['menus', 'Menus'], ['shops', 'Shops & restaurants'], ['desk', 'Pickup desk'], ['riders', 'Rider app'], ['zones', 'Zones'], ['points', 'Pickup points'], ['cats', 'Categories'], ['billing', 'Settings'], ['team', 'Team']];
+const TABS = [['orders', 'Orders'], ['phone', 'Phone orders'], ['campaigns', 'Campaigns'], ['couriers', 'Couriers'], ['payouts', 'Payouts'], ['refunds', 'Refunds'], ['menus', 'Menus'], ['shops', 'Shops & restaurants'], ['desk', 'Pickup desk'], ['riders', 'Rider app'], ['zones', 'Zones'], ['points', 'Pickup points'], ['cats', 'Categories'], ['billing', 'Settings'], ['team', 'Team']];
 let TAB = location.hash.slice(1) || 'orders', timer = null, IS_MASTER = false;
 const fail = e => alert(e?.message || String(e));
 
@@ -141,7 +141,7 @@ async function watchOrders() {
 }
 function show() {
   clearInterval(timer);
-  const fn = { orders, phone, couriers, payouts, refunds, menus, desk, cash, shops, riders, zones, points, cats, billing: IS_MASTER ? billing : orders, team: IS_MASTER ? team : orders }[TAB] || orders;
+  const fn = { orders, phone, campaigns, couriers, payouts, refunds, menus, desk, cash, shops, riders, zones, points, cats, billing: IS_MASTER ? billing : orders, team: IS_MASTER ? team : orders }[TAB] || orders;
   fn(); if (TAB === 'orders') timer = setInterval(() => { if (!document.querySelector('#main select:focus')) fn(); }, 20000);
 }
 const M = () => document.getElementById('main');
@@ -691,6 +691,25 @@ async function poPlace() {
     status: 'done', checkout_code: data.code, handled_by: me, handled_at: nowIso });
   alert(`Order ${data.code} placed. The customer has been texted to pay ${GH(data.total)} by MoMoPay. Follow it in the Orders tab (waiting for payment).`);
   PO.formOpen = false; phone();
+}
+
+// ---------- campaigns: results of each printed QR code (?src=...) ----------
+async function campaigns() {
+  const days = Number(sessionStorage.getItem('camp-days') || 30);
+  const { data, error } = await sb.rpc('ops_campaigns', { p_days: days });
+  if (error) return M().innerHTML = `<div class="err">${E(error.message)}</div>`;
+  const DAYS = { mon: 'Monday', tue: 'Tuesday', wed: 'Wednesday', thu: 'Thursday', fri: 'Friday', sat: 'Saturday', sun: 'Sunday' };
+  const label = s => s.split('-').map((w, i) => i === 0 ? ({ door: 'Door to door', flyer: 'Flyer', qr: 'QR card' })[w] || w : DAYS[w] || w).join(' · ');
+  const pct = (a, b) => b ? ` <span class="note">(${Math.round(100 * a / b)}%)</span>` : '';
+  const rows = data || [];
+  const tot = rows.reduce((t, r) => ({ phones: t.phones + +r.phones, installs: t.installs + +r.installs, baskets: t.baskets + +r.baskets, paid: t.paid + +r.paid_baskets, value: t.value + +r.paid_total }), { phones: 0, installs: 0, baskets: 0, paid: 0, value: 0 });
+  M().innerHTML = `<h2>Campaigns</h2>
+    <p class="note" style="margin-bottom:8px;">Each printed QR code carries a source (e.g. <b>door-thu</b>). We count each phone once: phones that scanned it, phones that installed the app, and orders placed and paid by those customers (the first QR code a phone scanned gets the credit).
+    Showing the last <select onchange="sessionStorage.setItem('camp-days',this.value);campaigns()">${[7, 30, 90].map(d => `<option value="${d}" ${d === days ? 'selected' : ''}>${d} days</option>`).join('')}</select>.</p>
+    ${rows.length ? `<table><tr><th>Campaign</th><th>Site</th><th>Phones scanned</th><th>Installed the app</th><th>Orders placed</th><th>Orders paid</th><th>Paid value</th><th>First scan</th></tr>
+      ${rows.map(r => `<tr><td><b>${E(label(r.src))}</b><div class="note">${E(r.src)}</div></td><td>nyansatek.${E(r.site)}</td><td>${r.phones}</td><td>${r.installs}${pct(r.installs, r.phones)}</td><td>${r.baskets}</td><td>${r.paid_baskets}</td><td><b>${GH(r.paid_total)}</b></td><td class="note">${r.first_seen ? new Date(r.first_seen).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}</td></tr>`).join('')}
+      <tr><td><b>Total</b></td><td></td><td><b>${tot.phones}</b></td><td><b>${tot.installs}</b>${pct(tot.installs, tot.phones)}</td><td><b>${tot.baskets}</b></td><td><b>${tot.paid}</b></td><td><b>${GH(tot.value)}</b></td><td></td></tr></table>`
+      : '<div class="empty">No scans yet. Results appear here as soon as someone scans a campaign QR code.</div>'}`;
 }
 
 // ---------- settings: where customers pay, the markup and the payment window ----------

@@ -474,7 +474,7 @@ function checkout() {
     if (alc && !document.getElementById('c-age').checked) { err.textContent = 'This order has alcohol. Tick the box to confirm you are 18 or older.'; return; }
     if (ful() === 'delivery' && v('c-loc').length < 2) { err.textContent = 'Enter your location so the rider can find you.'; return; }
     const p = { items: items.map(i => ({ org_id: i.org, product_id: i.p.id, qty: i.qty })), customer: { name: v('c-name'), phone: v('c-phone') },
-      fulfilment: ful(), payment_method: 'momo', note: v('c-note'), age_confirmed: alc };
+      fulfilment: ful(), payment_method: 'momo', note: v('c-note'), age_confirmed: alc, source: window.NT_SOURCE || undefined };
     if (ful() === 'delivery') Object.assign(p, { address: v('c-loc'), landmark: v('c-land') }); else p.pickup_point_id = v('c-point');
     btn.disabled = true; btn.textContent = 'Placing order…';
     const { data, error } = await sb.rpc('place_checkout', { p });
@@ -765,6 +765,33 @@ if ('serviceWorker' in navigator) window.addEventListener('load', () => navigato
 })();
 </script>
 <script>
+// ---------- campaign tracking: which printed QR code (?src=door-thu etc.) brought this phone ----------
+// A random device id stays in this browser. We record, once per source: a visit, and an install (first open of the
+// installed app). The source is also sent with the customer's order. No names or numbers are stored for tracking.
+(() => {
+  const URL_ = "https://kqwqbohoeltlbwcopeug.supabase.co", KEY = "sb_publishable_T6oCd3aRO0OPheQXEkmvRA_nvIhEPcv";
+  const site = /food/.test(location.hostname) ? 'food' : 'store';
+  const get = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+  const put = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
+  let src = (new URLSearchParams(location.search).get('src') || '').toLowerCase();
+  if (!/^[a-z0-9-]{1,30}$/.test(src)) src = '';
+  const qd = new URLSearchParams(location.search).get('d');
+  if (qd && /^[0-9a-f-]{36}$/.test(qd) && !get('nt-dev')) put('nt-dev', qd);  // same phone, handed over from another browser
+  let dev = get('nt-dev');
+  if (!dev) { dev = crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16); }); put('nt-dev', dev); }
+  if (src && !get('nt-src')) put('nt-src', src);          // first QR code that brought them keeps the credit
+  window.NT_SOURCE = get('nt-src') || null;
+  const log = (s, event) => fetch(URL_ + '/rest/v1/rpc/log_campaign_event', { method: 'POST', keepalive: true,
+    headers: { apikey: KEY, Authorization: 'Bearer ' + KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ p_src: s, p_site: site, p_event: event, p_device: dev }) }).catch(() => {});
+  if (src && src !== 'qr' && !get('nt-v-' + src)) { put('nt-v-' + src, '1'); log(src, 'visit'); }
+  const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  const markInstall = () => { const s = get('nt-src'); if (s && s !== 'qr' && !get('nt-i-' + s)) { put('nt-i-' + s, '1'); log(s, 'install'); } };
+  if (standalone) markInstall();
+  window.addEventListener('appinstalled', markInstall);
+})();
+</script>
+<script>
 // ---------- "Get the app" wall for visitors who scan the printed QR code ----------
 // Arriving with ?src=qr marks this phone. From then on, every visit in the browser shows a full-screen screen with
 // no close button until the app is installed: Android/Chrome installs with one tap; on iPhone it shows
@@ -773,7 +800,9 @@ if ('serviceWorker' in navigator) window.addEventListener('load', () => navigato
 (() => {
   const E = s => s == null ? '' : String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
   const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
-  const fromQr = new URLSearchParams(location.search).get('src') === 'qr';
+  const qsrc = (new URLSearchParams(location.search).get('src') || '').toLowerCase();
+  const fromQr = /^(qr|door-[a-z0-9-]+|flyer-[a-z0-9-]+)$/.test(qsrc);
+  const keep = fromQr ? qsrc : 'qr';
   const get = () => { try { return localStorage.getItem('nt-install'); } catch (e) { return null; } };
   const set = v => { try { localStorage.setItem('nt-install', v); } catch (e) {} };
   if (standalone) { set('done'); return; }
@@ -791,8 +820,9 @@ if ('serviceWorker' in navigator) window.addEventListener('load', () => navigato
   const chrome = /Chrome\/\d/.test(ua) && !/SamsungBrowser|OPR\/|OPX|EdgA|YaBrowser|UCBrowser|MiuiBrowser|HuaweiBrowser|HeyTapBrowser|VivoBrowser|Firefox|DuckDuckGo|PHX\//i.test(ua);
   const otherBrowser = android && !inApp && !chrome;
   const name = document.querySelector('meta[name=apple-mobile-web-app-title]')?.content || document.title;
-  const link = location.origin + location.pathname + '?src=qr';
-  const toChrome = `intent://${location.host}${location.pathname}?src=qr#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=${encodeURIComponent(link + '&nochrome=1')};end`;
+  const devId = (() => { try { return localStorage.getItem('nt-dev') || ''; } catch (e) { return ''; } })();
+  const link = location.origin + location.pathname + '?src=' + keep + (devId ? '&d=' + devId : '');
+  const toChrome = `intent://${location.host}${location.pathname}?src=${keep}${devId ? '&d=' + devId : ''}#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=${encodeURIComponent(link + '&nochrome=1')};end`;
   let deferred = null;
 
   const css = document.createElement('style');
