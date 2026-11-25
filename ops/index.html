@@ -699,7 +699,7 @@ async function campaigns() {
   const { data, error } = await sb.rpc('ops_campaigns', { p_days: days });
   if (error) return M().innerHTML = `<div class="err">${E(error.message)}</div>`;
   const DAYS = { mon: 'Monday', tue: 'Tuesday', wed: 'Wednesday', thu: 'Thursday', fri: 'Friday', sat: 'Saturday', sun: 'Sunday' };
-  const label = s => s.split('-').map((w, i) => i === 0 ? ({ door: 'Door to door', flyer: 'Flyer', qr: 'QR card' })[w] || w : DAYS[w] || w).join(' · ');
+  const label = s => s.split('-').map((w, i) => i === 0 ? ({ door: 'Door to door', flyer: 'Flyer', qr: 'QR card', wall: 'Wall sticker' })[w] || w : DAYS[w] || w).join(' · ');
   const pct = (a, b) => b ? ` <span class="note">(${Math.round(100 * a / b)}%)</span>` : '';
   const rows = data || [];
   const tot = rows.reduce((t, r) => ({ phones: t.phones + +r.phones, installs: t.installs + +r.installs, baskets: t.baskets + +r.baskets, paid: t.paid + +r.paid_baskets, value: t.value + +r.paid_total }), { phones: 0, installs: 0, baskets: 0, paid: 0, value: 0 });

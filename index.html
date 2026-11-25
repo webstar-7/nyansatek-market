@@ -801,7 +801,7 @@ if ('serviceWorker' in navigator) window.addEventListener('load', () => navigato
   const E = s => s == null ? '' : String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
   const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
   const qsrc = (new URLSearchParams(location.search).get('src') || '').toLowerCase();
-  const fromQr = /^(qr|door-[a-z0-9-]+|flyer-[a-z0-9-]+)$/.test(qsrc);
+  const fromQr = /^(qr|wall(-[a-z0-9-]+)?|door-[a-z0-9-]+|flyer-[a-z0-9-]+)$/.test(qsrc);
   const keep = fromQr ? qsrc : 'qr';
   const get = () => { try { return localStorage.getItem('nt-install'); } catch (e) { return null; } };
   const set = v => { try { localStorage.setItem('nt-install', v); } catch (e) {} };
