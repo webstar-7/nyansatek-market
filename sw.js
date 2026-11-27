@@ -4,7 +4,7 @@
      the saved copy is only used when the network fails
    - icons and pictures are served from the saved copy first, for speed
    - it NEVER stores anything from the database, sign-in or file storage */
-const VERSION = 'nyansatek-store-v14';
+const VERSION = 'nyansatek-store-v15';
 const SHELL = ['./', 'manifest.json', 'favicon.svg', 'icon-192.png', 'icon-512.png', 'assets/store-reel.jpg'];
 const LIBS = /(^|\.)(cdn\.jsdelivr\.net|fonts\.googleapis\.com|fonts\.gstatic\.com)$/;
 

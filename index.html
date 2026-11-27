@@ -380,10 +380,11 @@ function search(q) {
   gridPage(q ? `Results for “${q}”` : 'All products', '', { p_q: q || null });
 }
 async function shopPage(slug) {
-  const { data } = await sb.rpc('store_catalog', { p_slug: slug });
-  if (!data || !data.shop?.on_market) { app.innerHTML = '<div class="empty">This shop is not on nyansatek.store.</div>'; return; }
-  document.title = data.shop.name + ' · nyansatek.store';
-  gridPage(data.shop.name, data.shop.tagline ? `<p class="note" style="margin-top:14px;">${E(data.shop.tagline)}</p>` : '', { p_org: data.shop.org_id });
+  const { data: shop } = await sb.rpc('market_shop', { p_slug: slug });
+  if (!shop) { app.innerHTML = '<div class="empty">This shop is not on nyansatek.store.</div>'; return; }
+  document.title = shop.name + ' · nyansatek.store';
+  const closedNote = shop.is_open === false ? `<p class="note" style="margin-top:14px;"><b>Closed now</b>${shop.opens_at ? ' · opens at ' + E(shop.opens_at) : ''}. You can still look at the menu.</p>` : '';
+  gridPage(shop.name, (shop.tagline ? `<p class="note" style="margin-top:14px;">${E(shop.tagline)}</p>` : '') + closedNote, { p_org: shop.org_id });
 }
 async function product(orgId, id) {
   app.innerHTML = '<div class="empty">Loading…</div>';
