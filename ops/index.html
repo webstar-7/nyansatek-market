@@ -401,8 +401,9 @@ async function shops() {
       <td>${food ? 'Restaurant' : 'Shop'}</td><td>${tel(s.shop_phone || s.whatsapp_number)}${s.momo_number ? `<div class="note">Payout MoMo ${local(s.momo_number)}</div>` : '<div class="note" style="color:#b42318;">no payout MoMo</div>'}
         <div style="margin-top:4px;"><button class="btn sec" onclick="bizForm('${o.id}')">Edit details</button> <button class="btn sec" onclick="openMenu('${o.id}')">${food ? 'Menu' : 'Products'}</button></div></td>
       <td>${page ? `<a href="${page}" target="_blank" rel="noopener">${E(s.store_slug)}</a>` : '<span class="note">no web address</span>'}</td>
-      <td><span class="pill ${s.marketplace_status === 'approved' ? 'ok' : s.marketplace_status === 'pending' ? 'warn' : s.marketplace_status === 'suspended' ? 'bad' : ''}">${s.marketplace_status === 'approved' ? 'listed' : s.marketplace_status === 'pending' ? 'waiting' : s.marketplace_status === 'suspended' ? 'hidden' : 'not listed'}</span>
-        <div style="margin-top:4px;">${s.marketplace_status !== 'approved' ? `<button class="btn" onclick="setMarket('${o.id}','approved')">List</button>` : `<button class="btn bad" onclick="setMarket('${o.id}','suspended')">Hide</button>`}</div></td>
+      <td><span class="pill ${s.marketplace_status === 'approved' && s.listings_hidden_reason ? 'bad' : s.marketplace_status === 'approved' ? 'ok' : s.marketplace_status === 'pending' ? 'warn' : s.marketplace_status === 'suspended' ? 'bad' : ''}">${s.marketplace_status === 'approved' && s.listings_hidden_reason ? 'hidden' : s.marketplace_status === 'approved' ? 'listed' : s.marketplace_status === 'pending' ? 'waiting' : s.marketplace_status === 'suspended' ? 'hidden' : 'not listed'}</span>
+        ${s.listings_hidden_reason ? `<div class="note">${E(s.listings_hidden_reason)}</div>` : ''}
+        <div style="margin-top:4px;">${s.marketplace_status !== 'approved' || s.listings_hidden_reason ? `<button class="btn" onclick="setMarket('${o.id}','approved')">List</button>` : `<button class="btn bad" onclick="setMarket('${o.id}','suspended')">Hide</button>`}</div></td>
       <td style="white-space:nowrap;"><input type="time" id="h-o-${o.id}" value="${E((s.opens_at || '').slice(0, 5))}"> to <input type="time" id="h-c-${o.id}" value="${E((s.closes_at || '').slice(0, 5))}">
         <div class="note" style="margin-top:4px;">Closed on: ${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d, i) => `<label><input type="checkbox" class="h-d-${o.id}" value="${i + 1}" ${(s.closed_days || []).includes(i + 1) ? 'checked' : ''}>${d}</label>`).join(' ')}</div>
         <div style="margin-top:4px;"><label><input type="checkbox" id="h-p-${o.id}" ${s.paused ? 'checked' : ''}> Closed for now</label> <button class="btn" onclick="saveHours('${o.id}')">Save</button></div></td></tr>`;
@@ -452,7 +453,7 @@ async function upsertSettings(org, patch) {
 async function setMarket(org, status) {
   if (status === 'suspended' && !confirm('Hide all of this business\'s products from nyansatek.store / nyansatek.food?')) return;
   const { data: { user } } = await sb.auth.getUser();
-  upsertSettings(org, Object.assign({ marketplace_status: status }, status === 'approved' ? { approved_at: new Date().toISOString(), approved_by: user.id } : {}));
+  upsertSettings(org, Object.assign({ marketplace_status: status }, status === 'approved' ? { approved_at: new Date().toISOString(), approved_by: user.id, listings_hidden_reason: null } : {}));
 }
 
 // ---------- riders: review, checks and decision ----------
