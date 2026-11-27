@@ -22,6 +22,10 @@ a{color:var(--p);}
 .wrap{max-width:1180px;margin:0 auto;padding:0 16px;}
 header.top{background:var(--p);color:#fff;position:sticky;top:0;z-index:15;}
 header.top .row{display:flex;gap:12px;align-items:center;padding:12px 0;}
+.backbar{display:none;gap:8px;padding:0 0 10px;}
+.backbar.on{display:flex;}
+.backbar button,.backbar a{display:inline-flex;align-items:center;gap:6px;border:1px solid rgba(255,255,255,.55);background:rgba(255,255,255,.14);color:#fff;border-radius:999px;padding:7px 14px;font:inherit;font-weight:700;font-size:.88rem;text-decoration:none;cursor:pointer;}
+.backbar svg{width:16px;height:16px;}
 .brand{color:#fff;text-decoration:none;font-weight:800;font-size:1.15rem;white-space:nowrap;}
 .brand span{color:var(--a);}
 .search{flex:1;padding:10px 14px;border:0;border-radius:12px;font-size:1rem;min-width:0;}
@@ -134,6 +138,10 @@ footer{text-align:center;font-size:.8rem;color:var(--g);padding:24px 0 40px;line
     <input class="search" id="q" type="search" placeholder="Search products" enterkeyhint="search">
     <button class="cartbtn" onclick="go('/cart')" id="cartbtn">Cart</button>
   </div>
+  <div class="backbar" id="backbar">
+    <button type="button" id="backbtn" aria-label="Go back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>Back</button>
+    <a href="#/" data-link aria-label="Go to the home page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>Home</a>
+  </div>
   <nav class="nav" id="nav"></nav>
 </div></header>
 <main class="wrap" id="app"><div class="empty">Loading…</div></main>
@@ -225,12 +233,24 @@ document.getElementById('foodtile-x').addEventListener('click', () => {
 
 // GitHub Pages hosting: addresses use #, e.g. nyansatek.store/#/c/drinks
 function go(path) { if (location.hash === '#' + path) route(); else location.hash = '#' + path; }
-window.addEventListener('hashchange', () => { route(); window.scrollTo(0, 0); });
+// Back / Home bar. We count pages visited inside the app this session, so Back never leaves the app:
+// with nothing to go back to (arrived from a link or QR code) it goes home instead.
+// The trail also notices the phone's own back gesture (returning to the page before the current one).
+const trail = [location.hash || '#/'];
+window.addEventListener('hashchange', () => {
+  const h = location.hash || '#/';
+  if (trail.length > 1 && trail[trail.length - 2] === h) trail.pop(); else if (trail[trail.length - 1] !== h) trail.push(h);
+  route(); window.scrollTo(0, 0);
+});
+document.getElementById('backbtn').onclick = () => {
+  if (trail.length > 1) history.back(); else { trail.length = 0; trail.push('#/'); go('/'); }
+};
 const curPath = () => (location.hash.slice(1) || '/').split('?')[0];
 const curQuery = () => new URLSearchParams((location.hash.split('?')[1]) || '');
 document.getElementById('q').addEventListener('keydown', e => { if (e.key === 'Enter') go('/search?q=' + encodeURIComponent(e.target.value.trim())); });
 
 async function route() {
+  document.getElementById('backbar').classList.toggle('on', curPath() !== '/');
   await REF.ready;
   foodTile();
   const path = curPath().split('/').filter(Boolean).map(decodeURIComponent);
