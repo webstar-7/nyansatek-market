@@ -117,7 +117,7 @@ async function watchOrders() {
       const fresh = (data || []).filter(o => !SEEN.has(o.id + ':' + (o.momo_txn_id || '')));
       if (fresh.length) {
         beep();
-        const msg = fresh.map(o => o.code + (o.momo_txn_id ? ' · MoMo ID sent' : ' · new order')).join(', ');
+        const msg = fresh.map(o => o.code + (o.momo_txn_id ? (/^SAYS PAID/.test(o.momo_txn_id) ? ' · customer says paid' : ' · MoMo ID sent') : ' · new order')).join(', ');
         try { if (window.Notification && Notification.permission === 'granted') new Notification('NYANSATEK orders', { body: msg }); } catch (e) {}
         if (TAB === 'orders') orders();
       }
@@ -186,7 +186,7 @@ async function orders() {
       <td>${E(o.organizations?.business_name)}<div class="note">${tel(sh.shop_phone || sh.whatsapp_number)}</div></td>
       <td>${(o.online_order_items || []).map(i => `${i.qty} × ${E(i.name_snapshot)}`).join('<br>')}${o.customer_note ? `<div class="note">Note: ${E(o.customer_note)}</div>` : ''}</td>
       <td>${E(o.customer_name)}<div class="note">${tel(o.customer_phone)}</div>${o.fulfilment === 'delivery' ? `<div class="note">${E(o.address || '')}${o.landmark ? ' · ' + E(o.landmark) : ''}${o.delivery_zones?.name ? ' · ' + E(o.delivery_zones.name) : ''}</div>` : `<div class="note">Pickup · ${E(o.pickup_points?.name || '')}</div>`}</td>
-      <td><b>${GH(o.goods_total)}</b><div class="note">${paid(o) ? 'MoMo ✓' : 'MoMo not yet'}${o.momo_txn_id ? ' · ID ' + E(o.momo_txn_id) : ''}</div>${ck && !paid(o) ? `<div class="note">Look for <b>${GH(ck.total)}</b> for ${E(ck.code)}</div>` : ''}<div class="note">Shop gets ${GH(o.base_total ?? o.goods_total)}</div></td>
+      <td><b>${GH(o.goods_total)}</b><div class="note">${paid(o) ? 'MoMo ✓' : 'MoMo not yet'}${o.momo_txn_id ? (/^SAYS PAID/.test(o.momo_txn_id) ? ' · <b style="color:#b54708">customer says paid' + E(o.momo_txn_id.slice(9)) + '</b>' : ' · ID ' + E(o.momo_txn_id)) : ''}</div>${ck && !paid(o) ? `<div class="note">Look for <b>${GH(ck.total)}</b> for ${E(ck.code)}</div>` : ''}<div class="note">Shop gets ${GH(o.base_total ?? o.goods_total)}</div></td>
       <td><span class="pill ${pc}">${E(pt)}</span>${o.status === 'placed' && !paid(o) ? `<div class="note">${minsLeft(o)} min left to pay</div>` : ''}${o.cancel_reason && o.status === 'cancelled' ? `<div class="note">${E(o.cancel_reason)}${paid(o) ? ' · refund the MoMo' : ''}</div>` : ''}</td>
       <td>${o.couriers ? `${E(o.couriers.name)}<div class="note">${tel(o.couriers.phone)}</div>` : ''}${courierSel}</td>
       <td><div style="display:flex;gap:4px;flex-wrap:wrap;">${actions}${open ? ` <button class="btn bad" onclick="cancelOrder('${o.id}','${E(o.code)}')">Cancel</button>` : ''}</div></td></tr>`;
@@ -247,7 +247,7 @@ async function refunds() {
   if (error) return M().innerHTML = `<div class="err">${E(error.message)}</div>`;
   const due = (data || []).filter(o => o.refund_status === 'due'), done = (data || []).filter(o => o.refund_status === 'refunded');
   const row = o => `<tr><td><b>${E(o.code)}</b>${o.online_checkouts ? `<div class="note">Basket ${E(o.online_checkouts.code)}</div>` : ''}</td><td>${E(o.organizations?.business_name)}</td>
-    <td>${E(o.customer_name)}<div class="note">${tel(o.customer_phone)}</div></td><td><b>${GH(o.goods_total)}</b>${o.momo_txn_id ? `<div class="note">Paid with ID ${E(o.momo_txn_id)}</div>` : ''}</td>
+    <td>${E(o.customer_name)}<div class="note">${tel(o.customer_phone)}</div></td><td><b>${GH(o.goods_total)}</b>${o.momo_txn_id && !/^SAYS PAID/.test(o.momo_txn_id) ? `<div class="note">Paid with ID ${E(o.momo_txn_id)}</div>` : ''}</td>
     <td class="note">${E(o.cancel_reason || '')}<div>${o.cancelled_at ? new Date(o.cancelled_at).toLocaleString() : ''}</div></td>
     <td>${o.refund_status === 'due' ? `<button class="btn gold" onclick="markRefunded('${o.id}','${E(o.code)}','${E(GH(o.goods_total))}')">Refunded</button>` : `<span class="pill ok">refunded</span><div class="note">${E(o.refund_ref || '')} · ${new Date(o.refunded_at).toLocaleString()}</div>`}</td></tr>`;
   const table = list => list.length ? `<table><tr><th>Order</th><th>Shop / restaurant</th><th>Customer</th><th>Amount</th><th>Why cancelled</th><th></th></tr>${list.map(row).join('')}</table>` : '<div class="empty">None.</div>';

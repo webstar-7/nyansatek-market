@@ -186,6 +186,7 @@ const saveCart = () => { store.set('market-cart', CART); updateCartBtn(); };
 const cartCount = () => Object.values(CART).reduce((a, c) => a + Object.values(c.items).reduce((b, i) => b + i.qty, 0), 0);
 function updateCartBtn() { const n = cartCount(); document.getElementById('cartbtn').textContent = n ? `Cart (${n})` : 'Cart'; }
 function addToCart(p, d = 1) {
+  if (!(Number(p.price) > 0)) { if (window.openOrderByPhone) openOrderByPhone(); return; }
   const c = CART[p.org_id] || (CART[p.org_id] = { shop: { name: p.shop_name, slug: p.shop_slug }, items: {} });
   const cur = c.items[p.id]?.qty || 0, n = Math.max(0, Math.min(999, cur + d));
   if (n) c.items[p.id] = { qty: n, p }; else delete c.items[p.id];
@@ -311,7 +312,7 @@ const closedText = org => 'Closed now' + (REF.open[org]?.opens_at ? ' · opens '
 function cardHtml(p) {
   return `<a class="card" href="#/p/${p.org_id}/${p.id}" data-link>${PIMG(p)}
     <div class="body"><div class="name">${E(p.name)}</div><div class="shop">${E(p.shop_name)}</div>
-    <div class="price">${GH(p.price)}</div>${!p.in_stock ? '<div class="oos">Sold out</div>' : isClosed(p.org_id) ? `<div class="oos">${E(closedText(p.org_id))}</div>` : ''}</div></a>`;
+    <div class="price">${Number(p.price) > 0 ? GH(p.price) : 'Ask for price'}</div>${!p.in_stock ? '<div class="oos">Sold out</div>' : isClosed(p.org_id) ? `<div class="oos">${E(closedText(p.org_id))}</div>` : ''}</div></a>`;
 }
 async function gridPage(title, intro, args) {
   app.innerHTML = `${intro || ''}<h1>${E(title)}</h1><div class="grid" id="grid"><div class="empty" style="grid-column:1/-1">Loading…</div></div><div class="more" id="more"></div>`;
@@ -394,17 +395,19 @@ async function product(orgId, id) {
     const inCart = CART[p.org_id]?.items[p.id]?.qty || 0;
     app.innerHTML = `<div class="pdp">${PIMG(p)}
       <div><div class="note"><a href="#/c/${E(REF.cats.find(c => c.id === p.category_id)?.slug || '')}" data-link>${E(p.category_name)}</a></div>
-      <h1 style="margin-top:4px;">${E(p.name)}</h1><div class="price">${GH(p.price)}</div>
+      <h1 style="margin-top:4px;">${E(p.name)}</h1><div class="price">${Number(p.price) > 0 ? GH(p.price) : 'Ask for price'}</div>
       <p class="note">Sold by <a href="#/shop/${E(p.shop_slug)}" data-link>${E(p.shop_name)}</a> · delivered by NYANSATEK ${E(p.delivery_size)}</p>
       ${p.description ? `<p style="margin:12px 0;line-height:1.5;">${E(p.description)}</p>` : ''}
       <div style="margin:16px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
       ${!p.in_stock ? '<span class="status bad">Sold out</span>'
         : isClosed(p.org_id) ? `<span class="status bad">${E(closedText(p.org_id))}</span>`
+        : !(Number(p.price) > 0) ? '<button class="btn gold" id="ask">Ask for price and order</button><span class="note">Call, send a voice note, or ask us to call you.</span>'
         : inCart ? `<div class="qty"><button id="m">−</button><span>${inCart}</span><button id="pl">+</button></div><a class="btn gold" href="#/cart" data-link>Go to cart</a>`
         : '<button class="btn gold" id="add">Add to cart</button>'}</div>
       <p class="note">Pay by MoMo when you order. The rider's delivery fee is paid to the rider when it arrives.</p></div></div>`;
     const b = (id, d) => { const el = document.getElementById(id); if (el) el.onclick = () => { addToCart(p, d); render(); }; };
     b('add', 1); b('pl', 1); b('m', -1);
+    const ask = document.getElementById('ask'); if (ask) ask.onclick = () => openOrderByPhone();
   };
   render();
 }
@@ -522,9 +525,12 @@ async function tracking(token) {
       ${!ended ? `<ul class="steps">${steps.map(([k, t], i) => `<li class="${ORDER_OF(k) < done || (i === steps.length - 1 && done >= ORDER_OF(k)) ? 'done' : ORDER_OF(k) === done ? 'now' : ''}"><span class="dot"></span>${E(t)}</li>`).join('')}</ul>` : ''}</div>
     ${o.payment_method === 'momo' && !o.payment_confirmed && !ended ? `<div class="box"><b>Pay by MoMo</b>
       ${payTo(o.pay_to, o.total)}
-      <p class="note" style="margin-top:6px;">Use your order number <b>${E(o.code)}</b> as the reference, then enter the transaction ID below.</p>
-      ${o.status === 'placed' ? `<div class="fg"><label>MoMo transaction ID</label><input id="t-ref" value="${E(o.momo_txn_id || '')}"></div>
-      <button class="btn" id="t-send">Send transaction ID</button><div class="err" id="t-err"></div>` : ''}</div>` : ''}
+      ${o.status !== 'placed' ? '' : String(o.momo_txn_id || '').length ? `<div class="ok" style="margin-top:10px;background:#ecfdf3;border:1px solid #abefc6;color:#05603a;border-radius:10px;padding:10px;"><b>Thanks, we're checking your payment.</b><br>It usually takes a few minutes. This page updates by itself.</div>`
+        : `<p class="note" style="margin-top:10px;">When you've paid, tap the button below. That's all.</p>
+      <button class="btn gold" id="t-paid" style="width:100%;margin-top:6px;">I've paid</button>
+      <details style="margin-top:10px;"><summary class="note" style="cursor:pointer;">Paid from a different number?</summary>
+        <div class="fg" style="margin-top:6px;"><label>The number you paid from</label><input id="t-payer" type="tel" placeholder="024XXXXXXX"></div></details>`}
+      <div class="err" id="t-err"></div></div>` : ''}
     ${!ended && !finished && o.fulfilment === 'pickup' ? `<div class="box"><b>Your collection code</b><div class="big" style="margin:6px 0;">${E(o.delivery_code)}</div>
       <p class="note">Give this code to the pickup point staff only when you receive your order.</p></div>` : ''}
     ${o.courier && !ended && !finished ? `<div class="box"><b>Your rider</b><p style="margin-top:6px;">${E(o.courier.name)} · <a href="tel:0${E(String(o.courier.phone).slice(3))}">0${E(String(o.courier.phone).slice(3))}</a></p>
@@ -535,14 +541,15 @@ async function tracking(token) {
     <div class="box"><b>Items</b>${o.items.map(i => `<div class="sum" style="background:none;border:0;padding:4px 0;margin:0;"><div><span>${i.qty} × ${E(i.name)}</span><span>${GH(i.line_total)}</span></div></div>`).join('')}
       <div class="sum"><div><span>Items</span><span>${GH(o.goods_total)}</span></div>${o.fulfilment === 'delivery' ? `<div><span>Delivery</span><span>${Number(o.delivery_fee) ? GH(o.delivery_fee) : 'Paid to the rider on arrival'}</span></div>` : ''}<div class="tot"><span>Total paid by MoMo</span><span>${GH(o.total)}</span></div></div></div>
     <p class="note" style="text-align:center;margin:10px 0 20px;">Keep this page: it's your order tracking link. Questions? Call or WhatsApp us on <a href="tel:0536340578">${NYANSATEK_PHONE}</a>.</p></div>`;
-  const send = document.getElementById('t-send');
-  if (send) send.onclick = async () => {
-    const { error } = await sb.rpc('add_order_momo_ref', { p_token: token, p_txn: document.getElementById('t-ref').value.trim() });
-    if (error) { document.getElementById('t-err').textContent = errMsg(error); return; }
+  const paidBtn = document.getElementById('t-paid');
+  if (paidBtn) paidBtn.onclick = async () => {
+    paidBtn.disabled = true; paidBtn.textContent = 'Sending…';
+    const { error } = await sb.rpc('order_says_paid', { p_token: token, p_payer: (document.getElementById('t-payer')?.value || '').trim() || null });
+    if (error) { paidBtn.disabled = false; paidBtn.textContent = "I've paid"; document.getElementById('t-err').textContent = errMsg(error); return; }
     tracking(token);
   };
   if (!['completed', 'cancelled', 'returned'].includes(o.status)) trackTimer = setTimeout(() => {
-    if (curPath() === '/t/' + token && document.activeElement?.id !== 't-ref') tracking(token);
+    if (curPath() === '/t/' + token && document.activeElement?.id !== 't-payer') tracking(token);
   }, 20000);
 }
 
@@ -550,7 +557,8 @@ async function tracking(token) {
 function payTo(t, amount) {
   if (t.merchant_id) return `<p class="note" style="margin:6px 0;">Pay <b>${GH(amount)}</b> with MoMoPay to merchant ID:</p>
       <div class="big">${E(t.merchant_id)}</div>${t.momo_name ? `<div class="note">${E(t.momo_name)}</div>` : ''}
-      <p class="note" style="margin-top:6px;">On MTN MoMo: dial *170#, choose MoMoPay, then enter the merchant ID.</p>`;
+      <p class="note" style="margin-top:6px;">On MTN MoMo: dial *170#, choose MoMoPay, enter the merchant ID and the amount, then your PIN.</p>
+      <a class="btn sec" style="margin-top:8px;display:inline-block;" href="tel:*170%23">Dial *170# now</a>`;
   return `<p class="note" style="margin:6px 0;">Send <b>${GH(amount)}</b> by MoMo to:</p>
       <div class="big">${E('0' + String(t.momo_number || '').slice(3))}</div>${t.momo_name ? `<div class="note">${E(t.momo_name)}</div>` : ''}`;
 }
@@ -575,9 +583,12 @@ async function checkoutTracking(token) {
       ${allCancelled && first.cancel_reason ? `<p class="note" style="margin-top:8px;">${E(first.cancel_reason)}</p>` : ''}</div>
     ${unpaid ? `<div class="box"><b>Pay by MoMo</b>
       ${payTo(k.pay_to, total)}
-      <p class="note" style="margin-top:6px;">Use your order number <b>${E(k.code)}</b> as the reference, then enter the transaction ID below.</p>
-      <div class="fg"><label>MoMo transaction ID</label><input id="t-ref" value="${E(k.momo_txn_id || '')}"></div>
-      <button class="btn" id="t-send">Send transaction ID</button><div class="err" id="t-err"></div></div>` : ''}
+      ${String(k.momo_txn_id || '').length ? `<div class="ok" style="margin-top:10px;background:#ecfdf3;border:1px solid #abefc6;color:#05603a;border-radius:10px;padding:10px;"><b>Thanks, we're checking your payment.</b><br>It usually takes a few minutes. This page updates by itself.</div>`
+        : `<p class="note" style="margin-top:10px;">When you've paid, tap the button below. That's all.</p>
+      <button class="btn gold" id="t-paid" style="width:100%;margin-top:6px;">I've paid</button>
+      <details style="margin-top:10px;"><summary class="note" style="cursor:pointer;">Paid from a different number?</summary>
+        <div class="fg" style="margin-top:6px;"><label>The number you paid from</label><input id="t-payer" type="tel" placeholder="024XXXXXXX"></div></details>`}
+      <div class="err" id="t-err"></div></div>` : ''}
     ${first.fulfilment === 'delivery' ? `<div class="box"><b>Delivery to</b><p class="note" style="margin-top:6px;">${E([first.zone, first.address, first.landmark].filter(Boolean).join(' · '))}</p>
       <p class="note" style="margin-top:4px;">The rider will call you when they are close. Pay the rider's delivery fee when your order arrives.</p></div>` : ''}
     ${orders.map(o => `<div class="box"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;"><b>${E(o.shop.name)}</b>
@@ -588,14 +599,15 @@ async function checkoutTracking(token) {
       ${o.status === 'cancelled' && o.cancel_reason && !allCancelled ? `<p class="note" style="margin-top:6px;">${E(o.cancel_reason)}</p>` : ''}</div>`).join('')}
     <div class="box"><div class="sum" style="margin:0;"><div><span>Items</span><span>${GH(total)}</span></div>${first.fulfilment === 'delivery' ? '<div><span>Delivery</span><span>Paid to the rider on arrival</span></div>' : ''}<div class="tot"><span>Total by MoMo</span><span>${GH(total)}</span></div></div></div>
     <p class="note" style="text-align:center;margin:10px 0 20px;">Keep this page: it's your order tracking link. Questions? Call or WhatsApp us on <a href="tel:0536340578">${NYANSATEK_PHONE}</a>.</p></div>`;
-  const send = document.getElementById('t-send');
-  if (send) send.onclick = async () => {
-    const { error } = await sb.rpc('add_checkout_momo_ref', { p_token: token, p_txn: document.getElementById('t-ref').value.trim() });
-    if (error) { document.getElementById('t-err').textContent = errMsg(error); return; }
+  const paidBtn = document.getElementById('t-paid');
+  if (paidBtn) paidBtn.onclick = async () => {
+    paidBtn.disabled = true; paidBtn.textContent = 'Sending…';
+    const { error } = await sb.rpc('checkout_says_paid', { p_token: token, p_payer: (document.getElementById('t-payer')?.value || '').trim() || null });
+    if (error) { paidBtn.disabled = false; paidBtn.textContent = "I've paid"; document.getElementById('t-err').textContent = errMsg(error); return; }
     checkoutTracking(token);
   };
   if (!allCancelled && !done) trackTimer = setTimeout(() => {
-    if (curPath() === '/k/' + token && document.activeElement?.id !== 't-ref') checkoutTracking(token);
+    if (curPath() === '/k/' + token && document.activeElement?.id !== 't-payer') checkoutTracking(token);
   }, 20000);
 }
 
