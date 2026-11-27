@@ -274,10 +274,10 @@ async function menus() {
   window.MENU_ITEMS = items || [];
   M().innerHTML = `<h2>Menus and products</h2>
     <div class="row" style="margin-bottom:10px;"><label class="fg">Business<select id="mn-org">${(orgs || []).map(o => `<option value="${o.id}" ${o.id === MENU_ORG ? 'selected' : ''}>${E(o.business_name)}</option>`).join('')}</select></label>
-      <p class="note" style="flex:1;min-width:240px;">Prices are the business's own prices. Untick <b>Available</b> when a dish runs out; untick <b>Listed</b> to hide it. Changes show on the sites straight away.</p></div>
+      <p class="note" style="flex:1;min-width:240px;">Prices are the business's own prices; leave a price at 0 to show "Ask for price". Untick <b>Available</b> when a dish runs out; untick <b>Listed</b> to hide it. Changes show on the sites straight away.</p></div>
     <div class="box"><b>Add ${org?.vertical === 'food' ? 'a dish' : 'a product'}</b><div class="row" style="margin-top:8px;">
       <label class="fg">Name<input id="mn-name"></label><label class="fg">Menu section<input id="mn-sec" placeholder="e.g. Rice dishes"></label>
-      <label class="fg">Price (GH₵)<input id="mn-price" type="number" min="0" step="0.5"></label>
+      <label class="fg">Price (GH₵)<input id="mn-price" type="number" min="0" step="0.5" placeholder="empty = Ask for price"></label>
       <label class="fg">Category on the site<select id="mn-cat">${catOpts(null)}</select></label>
       <label class="fg">Photo (optional)<input id="mn-photo" type="file" accept="image/*"></label>
       <button class="btn gold" id="mn-add">Add</button></div></div>
@@ -294,7 +294,8 @@ async function menus() {
   document.getElementById('mn-add').onclick = async () => {
     const v = id => document.getElementById(id).value.trim(), price = Number(v('mn-price'));
     if (v('mn-name').length < 2) return alert('Enter a name.');
-    if (!(price > 0)) return alert('Enter the price.');
+    if (!(price >= 0)) return alert('Check the price.');
+    if (price === 0 && !confirm('No price: customers will see "Ask for price" and order it by phone. Continue?')) return;
     const file = document.getElementById('mn-photo').files[0], food = org?.vertical === 'food';
     let photo = null;
     if (file) { photo = await uploadPhoto(MENU_ORG, file); if (!photo) return; }
@@ -309,7 +310,7 @@ async function menuSave(i) {
   const patch = { name: v('mn-n-' + i).value.trim(), category: v('mn-s-' + i).value.trim() || null, price: Number(v('mn-p-' + i).value),
     market_category_id: v('mn-c-' + i).value || null, list_on_market: v('mn-l-' + i).checked, show_online: v('mn-l-' + i).checked };
   if (p.made_to_order) patch.stock = v('mn-a-' + i).checked ? 100000 : 0; else patch.stock = Math.max(0, parseInt(v('mn-q-' + i).value || '0', 10));
-  if (patch.name.length < 2 || !(patch.price > 0)) return alert('Check the name and price.');
+  if (patch.name.length < 2 || !(patch.price >= 0)) return alert('Check the name and price.');
   const { error } = await sb.from('products').update(patch).eq('id', p.id); if (error) fail(error); menus();
 }
 async function menuPhoto(i, file) {
@@ -390,11 +391,15 @@ async function shops() {
   const st = s => s ? (Array.isArray(s) ? s[0] : s) : null;
   M().innerHTML = `<h2>Shops & restaurants</h2><p class="note" style="margin-bottom:8px;">Online shops and menus are free and switched on for everyone. List a business here once its products or menu are ready; customers then see them with the markup added.
     Opening hours: leave both times empty to take orders all day. Outside the hours, on closed days or while "Closed for now" is ticked, customers cannot order from that business.</p>
-    <table><tr><th>Business</th><th>Type</th><th>Phone</th><th>Own page</th><th>Listed on nyansatek.store / .food</th><th>Opening hours</th></tr>${(data || []).map(o => {
+    <div id="biz-form"></div>
+    <button class="btn gold" id="biz-new" onclick="bizForm()">+ Add a restaurant or shop</button>
+    <table style="margin-top:12px;"><tr><th>Business</th><th>Type</th><th>Phone</th><th>Page</th><th>Listed on nyansatek.store / .food</th><th>Opening hours</th></tr>${(data || []).map(o => {
     const s = st(o.shop_online_settings) || {}, food = o.vertical === 'food';
-    const page = s.store_slug ? (food ? `https://nyansatek.rest/menu/?s=${E(s.store_slug)}` : `https://nyansatek.shop/shop/?s=${E(s.store_slug)}`) : '';
+    const page = !s.store_slug ? '' : s.store_enabled ? (food ? `https://nyansatek.rest/menu/?s=${E(s.store_slug)}` : `https://nyansatek.shop/shop/?s=${E(s.store_slug)}`)
+      : (food ? `https://nyansatek.food/#/shop/${E(s.store_slug)}` : `https://nyansatek.store/#/shop/${E(s.store_slug)}`);
     return `<tr><td><b>${E(o.business_name)}</b><div class="note">${E(o.contact_email || 'no software login')}</div></td>
-      <td>${food ? 'Restaurant' : 'Shop'}</td><td>${tel(s.shop_phone || s.whatsapp_number)}</td>
+      <td>${food ? 'Restaurant' : 'Shop'}</td><td>${tel(s.shop_phone || s.whatsapp_number)}${s.momo_number ? `<div class="note">Payout MoMo ${local(s.momo_number)}</div>` : '<div class="note" style="color:#b42318;">no payout MoMo</div>'}
+        <div style="margin-top:4px;"><button class="btn sec" onclick="bizForm('${o.id}')">Edit details</button> <button class="btn sec" onclick="openMenu('${o.id}')">${food ? 'Menu' : 'Products'}</button></div></td>
       <td>${page ? `<a href="${page}" target="_blank" rel="noopener">${E(s.store_slug)}</a>` : '<span class="note">no web address</span>'}</td>
       <td><span class="pill ${s.marketplace_status === 'approved' ? 'ok' : s.marketplace_status === 'pending' ? 'warn' : s.marketplace_status === 'suspended' ? 'bad' : ''}">${s.marketplace_status === 'approved' ? 'listed' : s.marketplace_status === 'pending' ? 'waiting' : s.marketplace_status === 'suspended' ? 'hidden' : 'not listed'}</span>
         <div style="margin-top:4px;">${s.marketplace_status !== 'approved' ? `<button class="btn" onclick="setMarket('${o.id}','approved')">List</button>` : `<button class="btn bad" onclick="setMarket('${o.id}','suspended')">Hide</button>`}</div></td>
@@ -402,7 +407,39 @@ async function shops() {
         <div class="note" style="margin-top:4px;">Closed on: ${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d, i) => `<label><input type="checkbox" class="h-d-${o.id}" value="${i + 1}" ${(s.closed_days || []).includes(i + 1) ? 'checked' : ''}>${d}</label>`).join(' ')}</div>
         <div style="margin-top:4px;"><label><input type="checkbox" id="h-p-${o.id}" ${s.paused ? 'checked' : ''}> Closed for now</label> <button class="btn" onclick="saveHours('${o.id}')">Save</button></div></td></tr>`;
   }).join('')}</table>`;
+  window.BIZ = data || [];
 }
+function bizForm(id) {
+  const o = id ? (window.BIZ || []).find(x => x.id === id) : null, s = o ? ((Array.isArray(o.shop_online_settings) ? o.shop_online_settings[0] : o.shop_online_settings) || {}) : {};
+  const t = x => E(String(x || '').slice(0, 5));
+  document.getElementById('biz-new').style.display = 'none';
+  document.getElementById('biz-form').innerHTML = `<div class="box" style="border-color:var(--a);">
+    <div style="display:flex;justify-content:space-between;align-items:center;"><b>${o ? 'Edit ' + E(o.business_name) : 'Add a restaurant or shop'}</b><button class="btn sec" onclick="bizClose()">Close</button></div>
+    <div class="row" style="margin-top:8px;">
+      <label class="fg" style="flex:2;">Business name<input id="bz-name" value="${E(o?.business_name || '')}" placeholder="e.g. 8 MINUTES KITCHEN"></label>
+      ${o ? '' : `<label class="fg">Type<select id="bz-type"><option value="food">Restaurant (nyansatek.food)</option><option value="shop">Shop (nyansatek.store)</option></select></label>`}
+      <label class="fg">Phone we call for orders<input id="bz-phone" type="tel" value="${E(s.shop_phone ? local(s.shop_phone) : '')}" placeholder="024XXXXXXX"></label>
+      <label class="fg">MoMo number for payouts<input id="bz-momo" type="tel" value="${E(s.momo_number ? local(s.momo_number) : '')}" placeholder="same as phone if empty"></label>
+      <label class="fg" style="flex:2;">Location<input id="bz-addr" value="${E(s.shop_address || '')}" placeholder="e.g. Asonkore, opposite Golden Bird Junction"></label>
+      <label class="fg">Opens<input id="bz-open" type="time" value="${o ? t(s.opens_at) : '07:00'}"></label>
+      <label class="fg">Closes<input id="bz-close" type="time" value="${o ? t(s.closes_at) : '21:00'}"></label></div>
+    <div class="note" style="margin-top:6px;">Closed on: ${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d, i) => `<label><input type="checkbox" class="bz-d" value="${i + 1}" ${(s.closed_days || []).includes(i + 1) ? 'checked' : ''}>${d}</label>`).join(' ')}</div>
+    ${o ? '' : '<p class="note" style="margin-top:6px;">It starts <b>not listed</b>. Next you add the menu or products; press <b>List</b> when they are ready so customers can see it.</p>'}
+    <div class="err" id="bz-err"></div>
+    <button class="btn gold" style="margin-top:6px;" onclick="bizSave(${o ? `'${o.id}'` : 'null'})">${o ? 'Save details' : 'Add and go to its menu'}</button></div>`;
+  document.getElementById('biz-form').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function bizClose() { document.getElementById('biz-form').innerHTML = ''; document.getElementById('biz-new').style.display = ''; }
+async function bizSave(id) {
+  const v = x => (document.getElementById(x)?.value || '').trim();
+  const p = { id, name: v('bz-name'), type: v('bz-type') || undefined, phone: v('bz-phone'), momo: v('bz-momo'), address: v('bz-addr'),
+    opens_at: v('bz-open'), closes_at: v('bz-close'), closed_days: [...document.querySelectorAll('.bz-d:checked')].map(x => Number(x.value)) };
+  const { data, error } = await sb.rpc('ops_save_business', { p });
+  if (error) return document.getElementById('bz-err').textContent = error.message;
+  if (id) return shops();
+  openMenu(data);
+}
+function openMenu(org) { MENU_ORG = org; document.querySelector('nav button[data-k="menus"]').click(); }
 async function saveHours(org) {
   const v = id => document.getElementById(id).value || null;
   upsertSettings(org, { opens_at: v('h-o-' + org), closes_at: v('h-c-' + org), paused: document.getElementById('h-p-' + org).checked,
